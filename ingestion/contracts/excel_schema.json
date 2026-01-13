@@ -1,0 +1,23 @@
+{
+  "schema_version": "v0",
+  "description": "Generic Excel maintenance report schema (assumption-based)",
+  "required_columns": [
+    "report_date",
+    "metric_name",
+    "metric_value"
+  ],
+  "optional_columns": [
+    "equipment_id",
+    "department",
+    "remarks"
+  ],
+  "dtypes": {
+    "report_date": "datetime",
+    "metric_name": "string",
+    "metric_value": "float",
+    "equipment_id": "string",
+    "department": "string",
+    "remarks": "string"
+  },
+  "time_column": "report_date"
+}

@@ -1,0 +1,134 @@
+| Architecture Layer   | Frontend Sees                    | Why                                            |
+| -------------------- | -------------------------------- | ---------------------------------------------- |
+| Data Profiler        | Data health, column roles, stats | Engineers trust data only if health is visible |
+| Rule Engine          | Rule results + explanations      | Maintenance needs explain ability               |
+| ML Engine            | Anomaly flags, confidence        | Not model internals                            |
+| Insight Orchestrator | Final merged insights            | Single source of truth                         |
+| Dashboard Blueprint  | KPIs, charts, layouts            | UI rendering logic                             |
+| Local SQLite         | Read-only views                  | Offline, auditable                             |
+
+| Backend Layer        | Frontend Responsibility     |
+| -------------------- | --------------------------- |
+| Ingestion            | ❌ Hidden                    |
+| Feature Store        | ❌ Hidden                    |
+| Profiler             | ✔ Data health, column roles |
+| Rule Engine          | ✔ Rule explanations         |
+| ML Engine            | ✔ Anomaly summaries         |
+| Insight Orchestrator | ✔ Final insights            |
+| Dashboard Blueprint  | ✔ Layout + charts           |
+| Local SQLite         | ✔ Read-only access          |
+
+
+Frontend Rules (Ingestion)
+
+All users can upload data
+
+Users must declare data source type
+
+Ingestion is explicit, manual, and versioned
+
+System shows run ID, summary, and status
+
+No raw data preview by default
+
+The frontend uses a persistent left sidebar with a central workspace. Navigation does not reset application state.
+
+GLOBAL NAVIGATION ITEMS
+1.HOME/System Overview
+2.DATA Ingestion
+3.Data Health Profiling
+4.Insights
+5.Dashboards
+6.Entity/Machine Explorer
+7.Exports & Reports
+8.System Metadata
+
+UPDATED SCREEN TIERS (FINAL)
+🔹 PRIMARY SCREENS (Sidebar)
+These are always visible.
+1.Home / Overview
+2.Data Ingestion
+3.Insights
+4.Dashboards
+5.Exports & Reports  (Promoted)
+
+🔹 CONTEXTUAL SCREENS
+1.Data Health & Profiling
+2.Entity / Explorer (Machine, Order, Time, etc.)
+
+🔹 HIDDEN / INFO SCREENS
+1.System Metadata (Advanced / About)
+
+
+Frontend Validation Checklist
+
+Global
+
+Fully offline operation
+
+No external network calls
+
+No blank screens
+
+Clear loading states everywhere
+
+Runs & Data
+
+Run search works correctly
+
+Active run clearly visible
+
+No cross-run mixing
+
+Insights
+
+Correct empty-state handling
+
+Clear explanations always shown
+
+Export navigation preserves context
+
+Dashboards
+
+Chart type restrictions enforced
+
+Soft delete works correctly
+
+Time range selection deterministic
+
+Exports
+
+Insights-only / dashboards-only / combined exports
+
+PDF & Excel generation
+
+Report search and deletion work correctly
+
+Errors
+
+Human-readable messages
+
+No stack traces
+
+No silent failures
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

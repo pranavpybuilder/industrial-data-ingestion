@@ -1,0 +1,31 @@
+{
+  "schema_version": "v0",
+  "description": "SAP PM IW29 maintenance order schema (assumption-based)",
+  "required_columns": [
+    "order_number",
+    "equipment_id",
+    "start_date"
+  ],
+  "optional_columns": [
+    "finish_date",
+    "order_type",
+    "functional_location",
+    "system_status",
+    "planner_group",
+    "work_center",
+    "breakdown_indicator"
+  ],
+  "dtypes": {
+    "order_number": "string",
+    "equipment_id": "string",
+    "start_date": "datetime",
+    "finish_date": "datetime",
+    "order_type": "string",
+    "functional_location": "string",
+    "system_status": "string",
+    "planner_group": "string",
+    "work_center": "string",
+    "breakdown_indicator": "bool"
+  },
+  "time_column": "start_date"
+}

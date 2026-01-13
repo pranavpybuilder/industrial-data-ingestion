@@ -1,0 +1,37 @@
+{
+  "schema_version": "v0",
+  "description": "Schema for messy, human-maintained operational Excel files",
+
+  "ingestion_type": "schema-less_with_constraints",
+
+  "required_entities": [
+    "at_least_one_table",
+    "metadata_object"
+  ],
+
+  "table_expectations": {
+    "min_rows": 2,
+    "allow_unnamed_columns": true,
+    "allow_mixed_types": true,
+    "allow_missing_headers": true
+  },
+
+  "metadata_expectations": {
+    "file_name": "string",
+    "detected_tables": "int",
+    "notes": "list[string]"
+  },
+
+  "validation_policy": {
+    "reject_on_missing_schema": false,
+    "reject_on_layout_change": false,
+    "reject_on_type_mismatch": false
+  },
+
+  "notes": [
+    "This schema intentionally avoids strict column enforcement.",
+    "Operational Excel files are ingested using heuristic-based table detection.",
+    "Semantic understanding is deferred to the Feature Store layer.",
+    "This schema will evolve as operational patterns stabilize."
+  ]
+}

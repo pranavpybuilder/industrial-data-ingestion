@@ -1,0 +1,80 @@
+version: "1.0"
+last_updated: "2026-01-12"
+owner: "Offline Endurance Intelligence - Feature Store"
+
+entities:
+
+  machine:
+    primary_key: machine_id
+    features:
+      - name: cycle_time
+        source: plc
+        type: raw
+        dtype: float
+        description: "Time taken per machine cycle"
+
+      - name: avg_cycle_time_5min
+        source: plc
+        type: aggregated
+        window: 5m
+        dtype: float
+        description: "Average cycle time over 5 minute window"
+
+      - name: machine_utilization
+        source: plc
+        type: derived
+        dtype: float
+        description: "Ratio of productive time to total time"
+
+      - name: downtime_flag
+        source: plc
+        type: derived
+        dtype: boolean
+        description: "Indicates machine downtime state"
+
+  operator:
+    primary_key: operator_id
+    features:
+      - name: presence_duration
+        source: rfid
+        type: derived
+        dtype: float
+        description: "Total time operator was present"
+
+      - name: idle_but_present
+        source: rfid
+        type: derived
+        dtype: boolean
+        description: "Operator present but no machine activity"
+
+  order:
+    primary_key: order_id
+    features:
+      - name: planned_quantity
+        source: sap
+        type: raw
+        dtype: integer
+        description: "Planned production quantity"
+
+      - name: actual_quantity
+        source: sap
+        type: raw
+        dtype: integer
+        description: "Actual produced quantity"
+
+      - name: production_variance
+        source: sap
+        type: derived
+        dtype: integer
+        description: "Actual minus planned quantity"
+
+      - name: order_duration_minutes
+        source: sap
+        type: derived
+        dtype: float
+        description: "Total order execution time in minutes"
+
+time_features:
+  - hour_of_day
+  - day_of_week
+  - shift

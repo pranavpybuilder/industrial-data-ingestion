@@ -1,0 +1,26 @@
+version: "1.0"
+
+time_strategy:
+  mode: "event_time"
+  base_timezone: "IST"
+
+windows:
+  default_window: "5m"
+  supported_windows:
+    - "1m"
+    - "5m"
+    - "15m"
+
+late_data_handling:
+  allowed_lateness: "2m"
+  action: "discard"
+
+alignment_rules:
+  sap:
+    align_on: order_start_time
+  rfid:
+    align_on: event_timestamp
+  plc:
+    align_on: signal_timestamp
+  excel:
+    align_on: report_date

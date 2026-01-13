@@ -1,0 +1,53 @@
+{
+  "schema_version": "v0",
+  "description": "SAP-derived maintenance analysis Excel schema for dashboarding",
+
+  "required_columns": [
+    "date",
+    "equipment_number",
+    "machine_name",
+    "downtime"
+  ],
+
+  "optional_columns": [
+    "machine_description",
+    "user_state",
+    "malfunction_start_date",
+    "malfunction_end_date",
+    "malfunction_start_time",
+    "malfunction_end_time",
+    "created",
+    "why1",
+    "why2",
+    "why3",
+    "why4",
+    "why5"
+  ],
+
+  "dtypes": {
+    "date": "datetime",
+    "equipment_number": "string",
+    "machine_name": "string",
+    "machine_description": "string",
+    "user_state": "string",
+    "downtime": "float",
+    "malfunction_start_date": "datetime",
+    "malfunction_end_date": "datetime",
+    "malfunction_start_time": "string",
+    "malfunction_end_time": "string",
+    "created": "datetime",
+    "why1": "string",
+    "why2": "string",
+    "why3": "string",
+    "why4": "string",
+    "why5": "string"
+  },
+
+  "time_column": "date",
+
+  "notes": [
+    "This is a v0 assumption-based schema.",
+    "Only core columns are mandatory to prevent ingestion failure.",
+    "Schema will be refined after validation with real production files."
+  ]
+}

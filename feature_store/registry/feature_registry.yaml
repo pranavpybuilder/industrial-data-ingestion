@@ -1,0 +1,110 @@
+version: "1.0"
+layer: "feature_store"
+last_updated: "2026-01-12"
+
+features:
+
+  avg_cycle_time_5min:
+    entity: machine
+    source: plc
+    owner: maintenance_analytics
+    version: "1.0"
+    description: >
+      Average machine cycle time computed over a fixed 5-minute window
+      using PLC / OPC-UA signals.
+
+  machine_utilization:
+    entity: machine
+    source: plc
+    owner: maintenance_analytics
+    version: "1.0"
+    description: >
+      Ratio of productive machine states to total observed states
+      within a fixed time window.
+
+  downtime_flag:
+    entity: machine
+    source: plc
+    owner: maintenance_analytics
+    version: "1.0"
+    description: >
+      Boolean indicator signifying that no productive machine activity
+      was observed within the aggregation window.
+
+  presence_event_count:
+    entity: operator
+    source: rfid
+    owner: maintenance_analytics
+    version: "1.0"
+    description: >
+      Count of RFID events associated with an operator within a fixed
+      time window, used as a conservative presence indicator.
+
+  idle_but_present:
+    entity: operator
+    source: rfid
+    owner: maintenance_analytics
+    version: "1.0"
+    description: >
+      Boolean indicator identifying operators who were present according
+      to RFID data but showed no active interaction events.
+
+  planned_quantity:
+    entity: order
+    source: sap
+    owner: maintenance_planning
+    version: "1.0"
+    description: >
+      Planned production quantity extracted from SAP order data.
+
+  actual_quantity:
+    entity: order
+    source: sap
+    owner: maintenance_planning
+    version: "1.0"
+    description: >
+      Actual produced quantity consolidated from SAP execution records.
+
+  production_variance:
+    entity: order
+    source: sap
+    owner: maintenance_planning
+    version: "1.0"
+    description: >
+      Difference between actual and planned production quantities.
+
+  order_duration_minutes:
+    entity: order
+    source: sap
+    owner: maintenance_planning
+    version: "1.0"
+    description: >
+      Total execution duration of a production order in minutes,
+      calculated using start and end timestamps.
+
+  excel_record_present:
+    entity: machine
+    source: excel
+    owner: maintenance_reporting
+    version: "1.0"
+    description: >
+      Indicator feature marking the presence of an Excel-based report
+      record for a machine within a given time window.
+
+  oee:
+    entity: machine
+    source: excel
+    owner: maintenance_reporting
+    version: "1.0"
+    description: >
+      Overall Equipment Effectiveness value extracted from
+      SAP-derived Excel maintenance reports.
+
+  manual_flag:
+    entity: machine
+    source: excel
+    owner: maintenance_engineers
+    version: "1.0"
+    description: >
+      Manually maintained indicator flag extracted from operational
+      Excel files and treated as a soft signal.

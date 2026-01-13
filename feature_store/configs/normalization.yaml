@@ -1,0 +1,28 @@
+version: "1.0"
+
+strategies:
+
+  min_max:
+    - cycle_time
+    - avg_cycle_time_5min
+    - order_duration_minutes
+
+  z_score:
+    - machine_utilization
+    - presence_duration
+    - production_variance
+
+  none:
+    - downtime_flag
+    - idle_but_present
+    - hour_of_day
+    - day_of_week
+    - shift
+
+categorical_encoding:
+  one_hot:
+    - shift
+  label:
+    - machine_id
+    - operator_id
+    - order_id

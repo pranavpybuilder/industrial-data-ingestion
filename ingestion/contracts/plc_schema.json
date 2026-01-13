@@ -1,0 +1,25 @@
+{
+  "schema_version": "v0",
+  "description": "PLC / OPC-UA machine log schema (assumption-based)",
+  "required_columns": [
+    "machine_id",
+    "event_time",
+    "parameter_name",
+    "parameter_value"
+  ],
+  "optional_columns": [
+    "unit",
+    "status",
+    "alarm_code"
+  ],
+  "dtypes": {
+    "machine_id": "string",
+    "event_time": "datetime",
+    "parameter_name": "string",
+    "parameter_value": "float",
+    "unit": "string",
+    "status": "string",
+    "alarm_code": "string"
+  },
+  "time_column": "event_time"
+}

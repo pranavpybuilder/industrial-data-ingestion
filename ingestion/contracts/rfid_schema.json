@@ -1,0 +1,23 @@
+{
+  "schema_version": "v0",
+  "description": "RFID event data schema (assumption-based)",
+  "required_columns": [
+    "tag_id",
+    "event_time",
+    "reader_id"
+  ],
+  "optional_columns": [
+    "event_type",
+    "location",
+    "signal_strength"
+  ],
+  "dtypes": {
+    "tag_id": "string",
+    "event_time": "datetime",
+    "reader_id": "string",
+    "event_type": "string",
+    "location": "string",
+    "signal_strength": "float"
+  },
+  "time_column": "event_time"
+}
