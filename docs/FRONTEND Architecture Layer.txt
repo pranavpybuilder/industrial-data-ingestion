@@ -112,6 +112,25 @@ No stack traces
 
 No silent failures
 
+DAY 7
+| Screen      | Responsibility              |
+| ----------- | --------------------------- |
+| Home        | System confidence & entry   |
+| Ingestion   | Trigger & navigate only     |
+| Insights    | Display merged intelligence |
+| Dashboards  | Visualize feature outputs   |
+| Exports     | Generate & manage reports   |
+| Explorer    | Contextual deep-dive        |
+| Data Health | Trust & transparency        |
+| Metadata    | Audit & inspection          |
+
+
+| API Method               | Purpose                     | Scope      |
+| ------------------------ | --------------------------- | ---------- |
+| `get_runs()`             | List ingestion runs         | Global     |
+| `get_insights(run_id)`   | Insights for selected run   | Run-scoped |
+| `get_dashboards(run_id)` | Dashboards for selected run | Run-scoped |
+| `get_reports()`          | Exported reports metadata   | Global     |
 
 
 

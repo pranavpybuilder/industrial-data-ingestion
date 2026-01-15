@@ -19,3 +19,13 @@ pyyaml>=6.0.1
 scikit-learn>=1.3.0
 scipy>=1.11.0
 joblib>=1.3.0
+
+# ===============================
+# Frontend Desktop Application
+# ===============================
+
+# Qt-based desktop shell (offline)
+PySide6>=6.7.0
+
+# Packaging into standalone .exe
+pyinstaller>=6.0.0

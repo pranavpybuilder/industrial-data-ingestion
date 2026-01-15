@@ -1,132 +1,65 @@
-# Frontend Architecture Layer  
+# Frontend Architecture
 Offline Industrial Data Intelligence System
 
-## Overview
-
-The frontend layer is implemented as a **fully offline Electron desktop application** with a **React-based renderer**.  
-It is designed strictly as a **read-only intelligence consumer**, ensuring that no analytics, feature computation, rule evaluation, or machine learning logic is executed at the UI level.
-
-The frontend consumes only **final, validated, and versioned outputs** from backend layers through controlled interfaces, preserving determinism, auditability, and data confidentiality.
+## Purpose
+The frontend provides engineers with a fully offline, deterministic interface to ingest data, select operational runs, explore insights, create dashboards, and export reports—without exposing backend complexity.
 
 ---
 
 ## Core Design Principles
-
-- Fully offline operation with no internet dependency
-- No cloud services, telemetry, or external APIs
-- Strict separation between UI state and system intelligence
-- Run-scoped visibility for insights and dashboards
-- Explainability-first design for maintenance engineers
-- Deterministic rendering based on backend outputs
+- **Offline-first**: No network APIs, no localhost dependencies.
+- **Run-scoped workflows**: Every insight, dashboard, and export is tied to a specific ingestion run.
+- **Explicit system state**: The UI always communicates whether the system is ready for analysis.
+- **No duplicated enforcement**: UX guidance and routing protection are intentionally separated.
 
 ---
 
-## Frontend Responsibility Mapping
-
-### Backend Layers Visible to Frontend
-
-| Architecture Layer | Frontend Sees | Reason |
-|-------------------|---------------|--------|
-| Data Profiler | Data health, column roles, statistics | Engineers trust data only when quality is visible |
-| Rule Engine | Rule results and explanations | Maintenance decisions require explainability |
-| ML Engine | Anomaly flags and confidence scores | Model internals must remain hidden |
-| Insight Orchestrator | Final merged insights | Single source of truth |
-| Dashboard Blueprint Engine | KPIs, charts, layouts | UI rendering logic |
-| Local SQLite Storage | Read-only views | Offline and auditable |
-
-### Backend Layers Hidden from Frontend
-
-| Backend Layer | Frontend Access |
-|--------------|-----------------|
-| Ingestion | ❌ Hidden |
-| Feature Store | ❌ Hidden |
-| Normalization | ❌ Hidden |
-| Raw Data Sources | ❌ Hidden |
+## Frontend Responsibilities
+- Run selection and visibility
+- Navigation and workflow guidance
+- Metrics and operational overview
+- Safe handling of empty and first-time states
+- Desktop-grade UX consistency
 
 ---
 
-## Navigation Structure
+## Key Architectural Components
 
-The frontend uses a **persistent left sidebar** with a **central workspace**.  
-Navigation does not reset application state and is optimized for long-running industrial usage.
+### Run UI Store
+- Single authoritative source of run context.
+- Guarded setters prevent redundant updates.
+- Stable snapshot and subscription model.
 
-### Primary Screens (Always Visible)
+### Sidebar (Control Surface)
+- Persistent branding and navigation.
+- Active run visibility at all times.
+- Run selection and clearing actions.
+- Visual guarding of run-dependent sections.
 
-1. Home / System Overview  
-2. Data Ingestion  
-3. Insights  
-4. Dashboards  
-5. Exports & Reports  
+### RunGuard
+- Enforces valid navigation paths.
+- Prevents access to insights, dashboards, exports without an active run.
+- Keeps enforcement logic centralized and predictable.
 
-### Contextual Screens
-
-- Data Health & Profiling  
-- Entity / Explorer (Machine, Order, Time, Report)
-
-### Hidden / Advanced Screens
-
-- System Metadata (Advanced / About)
-
----
-
-## Run-Scoped Intelligence Model
-
-- Every ingestion creates an immutable **run**
-- Insights and dashboards are always scoped to a single run
-- Users can switch runs via a searchable run selector
-- No implicit merging of runs is allowed
-- Switching runs never triggers recomputation
+### System Overview
+- Displays operational metrics:
+  - Total runs
+  - Total insights
+  - Total dashboards
+  - Total exports
+- Safe zero-state handling (first-time users).
 
 ---
 
-## Export Lifecycle Design
-
-Exports are treated as **first-class system outcomes**.
-
-### Supported Export Scopes
-
-- Insights only  
-- Dashboards only  
-- Combined Insights + Dashboards  
-
-### Supported Formats
-
-- Excel  
-- PDF  
-
-### Export Characteristics
-
-- Exports consume only precomputed outputs
-- Exported reports are immutable
-- Reports are searchable by run, file name, type, and timestamp
+## UX Safeguards
+- Disabled visual states for unavailable sections.
+- Tooltips explaining required actions.
+- Truncation and overflow handling for long identifiers (file names).
+- No surprise errors or silent failures.
 
 ---
 
-## UI Behavior Guarantees
-
-- No blank screens under any condition
-- Explicit empty-state messaging
-- Human-readable error explanations
-- Offline-first assumptions everywhere
-- No auto-fixing, guessing, or silent failures
-
----
-
-## Frontend Validation Guarantees
-
-The frontend guarantees:
-
-- No cross-run data leakage
-- No analytics execution from UI actions
-- Full auditability via run IDs and metadata
-- Deterministic and reproducible rendering
-- Safe deletion (soft delete for dashboards, explicit delete for reports)
-
----
-
-## Next Steps
-
-- Implement Electron main process and secure IPC layer
-- Implement React renderer following defined contracts
-- Validate frontend using the defined validation checklist
-- Integrate frontend with backend storage and orchestration outputs
+## Current Status
+- Frontend foundation is complete and stable.
+- Ready for feature-level UI scaffolding.
+- Fully aligned with backend ingestion and feature-store architecture.

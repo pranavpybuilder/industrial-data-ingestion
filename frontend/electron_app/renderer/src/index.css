@@ -1,0 +1,41 @@
+/* Global reset */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Base document styling */
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans",
+    "Helvetica Neue", sans-serif;
+  background-color: #f5f6f8;
+  color: #1f2933;
+}
+
+/* Headings */
+h1 {
+  font-size: 28px;
+  font-weight: 600;
+  color: #1f2933;
+  margin-bottom: 12px;
+}
+
+h2 {
+  font-size: 20px;
+  font-weight: 500;
+  color: #1f2933;
+  margin-bottom: 8px;
+}
+
+/* Paragraphs */
+p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #4b5563;
+}
