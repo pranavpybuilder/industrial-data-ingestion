@@ -1,15 +1,25 @@
 import React from "react";
-import { runUI } from "../../state/run_ui_store";
+import { onRunChange } from "../../state/state_reset";
 
 interface Props {
   onClose: () => void;
 }
 
+/**
+ * RunSelectorModal
+ *
+ * Purpose:
+ * - Allows user to select an already ingested dataset (run)
+ * - Delegates ALL state changes to the central orchestration layer
+ *
+ * IMPORTANT:
+ * - This component NEVER talks directly to runUI or dashboardsUI
+ * - All side effects go through `onRunChange`
+ */
 export function RunSelectorModal({ onClose }: Props) {
   /**
-   * UI-only placeholder.
-   * These represent filenames on which ingestion occurred.
-   * Will be replaced by backend-provided metadata later.
+   * UI-only placeholder list.
+   * Later this will come from backend / IPC.
    */
   const ingestedFiles = [
     "sap_pm_iw29_2024_01_12.xlsx",
@@ -35,7 +45,15 @@ export function RunSelectorModal({ onClose }: Props) {
                 <button
                   style={fileButton}
                   onClick={() => {
-                    runUI.setActiveRun(fileName);
+                    /**
+                     * CENTRALIZED STATE CHANGE
+                     * ------------------------
+                     * This will:
+                     * 1. Set active run
+                     * 2. Reset dashboard state
+                     * 3. Initialize dashboard for this run
+                     */
+                    onRunChange(fileName);
                     onClose();
                   }}
                 >
@@ -54,7 +72,7 @@ export function RunSelectorModal({ onClose }: Props) {
   );
 }
 
-/* ---------- Styles ---------- */
+/* -------------------- Styles -------------------- */
 
 const overlay: React.CSSProperties = {
   position: "fixed",
