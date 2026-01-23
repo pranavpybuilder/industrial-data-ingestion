@@ -1,41 +1,49 @@
-import { Outlet } from "react-router-dom";
+import { useState } from "react";
 import Sidebar from "../components/Sidebar/Sidebar";
 
-/**
- * Global application layout.
- *
- * Responsibilities:
- * - Persistent sidebar
- * - Main content container
- * - Stable UI shell across route changes
- *
- * No data access is allowed here.
- */
-const Layout = () => {
+interface Props {
+  children: React.ReactNode;
+}
+
+const Layout = ({ children }: Props) => {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
   return (
-    <div style={styles.root}>
-      <Sidebar />
-      <main style={styles.content}>
-        <Outlet />
-      </main>
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        width: "100vw",
+        overflow: "hidden",
+      }}
+    >
+      {/* Sidebar */}
+      <div
+        style={{
+          width: sidebarOpen ? "260px" : "48px",
+          transition: "width 0.25s ease",
+          background: "#1f2933",
+        }}
+      >
+        <Sidebar
+          collapsed={!sidebarOpen}
+          onToggle={() => setSidebarOpen((v) => !v)}
+        />
+      </div>
+
+      {/* Main Content */}
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+          background: "#f3f4f6",
+          padding: "1rem",
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-  root: {
-    display: "flex",
-    height: "100vh",
-    width: "100vw",
-    overflow: "hidden",
-    backgroundColor: "#f5f6f8",
-  },
-  content: {
-    flex: 1,
-    padding: "16px",
-    overflowY: "auto",
-    minWidth: 0,
-  },
 };
 
 export default Layout;

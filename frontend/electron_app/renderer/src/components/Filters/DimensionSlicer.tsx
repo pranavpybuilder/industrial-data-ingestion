@@ -1,44 +1,42 @@
 import { dashboardsUI } from "../../state/dashboards_ui_store";
 
-interface DimensionSlicerProps {
-  slicerId: string;
-  label: string;
-  options: string[];
-}
-
-const DimensionSlicer = ({
-  slicerId,
-  label,
-  options,
-}: DimensionSlicerProps) => {
+/**
+ * DimensionSlicer
+ * ----------------
+ * Global dimension slicer (safe version).
+ * Does NOT assume filter keys exist.
+ */
+const DimensionSlicer = () => {
   const state = dashboardsUI.getState();
   const interaction = state.interactionState;
 
   if (!interaction) return null;
 
-  const value =
-    (interaction.slicers[slicerId] as string) || "";
+  // ✅ SAFE access with fallback
+  const equipment =
+    interaction.globalFilters?.equipment ?? "";
 
-  const onChange = (val: string) => {
+  const onChange = (value: string) => {
     dashboardsUI.updateInteraction((prev) => ({
       ...prev,
-      slicers: {
-        ...prev.slicers,
-        [slicerId]: val,
+      globalFilters: {
+        ...prev.globalFilters,
+        equipment: value,
       },
     }));
   };
 
   return (
-    <div>
-      <label>{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+    <div style={{ marginBottom: "0.5rem" }}>
+      <label>Equipment:</label>
+      <select
+        value={equipment}
+        onChange={(e) => onChange(e.target.value)}
+      >
         <option value="">All</option>
-        {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
+        <option value="Machine-1">Machine-1</option>
+        <option value="Machine-2">Machine-2</option>
+        <option value="Machine-3">Machine-3</option>
       </select>
     </div>
   );

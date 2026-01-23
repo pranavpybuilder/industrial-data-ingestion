@@ -132,7 +132,15 @@ DAY 7
 | `get_dashboards(run_id)` | Dashboards for selected run | Run-scoped |
 | `get_reports()`          | Exported reports metadata   | Global     |
 
+Create a Day 13 task-by-task execution plan and make this graph/chart visual and give me full final files only for making this change
 
+Primary (Topbar):    #1e1b4b
+Sidebar (Base):      #18163a
+Sidebar (Hover):     #23206a
+Divider / Border:    #312e81
+Text Primary:        #ffffff
+Text Muted:          #c7d2fe
+Accent (Buttons):    #6366f1
 
 
 

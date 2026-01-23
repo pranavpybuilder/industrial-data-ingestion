@@ -1,0 +1,10 @@
+{
+    "schema_version":"v0",
+    "description":"Generic power cost analysis excel schema",
+    "required_columns":[
+        "machine_name",
+        "date",
+        "daily_consumption",
+        "products"
+    ]
+}

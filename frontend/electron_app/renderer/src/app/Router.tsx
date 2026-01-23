@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
-import Layout from "./Layout";
+import AppLayout from "./AppLayout";
 
 import Home from "../pages/Home/Home";
 import Ingestion from "../pages/Ingestion/Ingestion";
@@ -13,55 +13,51 @@ import { RunGuard } from "../components/RunGuard/RunGuard";
 
 export const router = createBrowserRouter([
   {
-    path: "/",
-    element: <Layout />,
-    children: [
-      { index: true, element: <Home /> },
-
-      { path: "ingestion", element: <Ingestion /> },
-
-      {
-        path: "insights",
-        element: (
-          <RunGuard>
-            <Insights />
-          </RunGuard>
-        ),
-      },
-      {
-        path: "dashboards",
-        element: (
-          <RunGuard>
-            <Dashboards />
-          </RunGuard>
-        ),
-      },
-      {
-        path: "exports",
-        element: (
-          <RunGuard>
-            <Exports />
-          </RunGuard>
-        ),
-      },
-      {
-        path: "explorer",
-        element: (
-          <RunGuard>
-            <Explorer />
-          </RunGuard>
-        ),
-      },
-      {
-        path: "data-health",
-        element: (
-          <RunGuard>
-            <DataHealth />
-          </RunGuard>
-        ),
-      },
-
-      { path: "*", element: <Navigate to="/" replace /> },
-    ],
-  },
+  path: "/",
+  element: <AppLayout />,
+  children: [
+    { index: true, element: <Home /> },
+    { path: "ingestion", element: <Ingestion /> },
+    {
+      path: "insights",
+      element: (
+        <RunGuard>
+          <Insights />
+        </RunGuard>
+      ),
+    },
+    {
+      path: "dashboards",
+      element: (
+        <RunGuard>
+          <Dashboards />
+        </RunGuard>
+      ),
+    },
+    {
+      path: "exports",
+      element: (
+        <RunGuard>
+          <Exports />
+        </RunGuard>
+      ),
+    },
+    {
+      path: "explorer",
+      element: (
+        <RunGuard>
+          <Explorer />
+        </RunGuard>
+      ),
+    },
+    {
+      path: "data-health",
+      element: (
+        <RunGuard>
+          <DataHealth />
+        </RunGuard>
+      ),
+    },
+  ],
+},
 ]);

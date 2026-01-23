@@ -1,17 +1,60 @@
 /**
  * Dashboards UI Store
  * -------------------
- * Reactive, undo/redo capable, run-scoped dashboard state.
+ * Single source of truth for all dashboard interaction state.
+ * Supports:
+ * - Global filters
+ * - Widget-level filters
+ * - Session (temporary) filters
+ * - Drill-down / drill-through context
+ * - Visualization state
+ * - Hidden widgets
+ * - Undo / Redo
+ *
+ * Designed for:
+ * - Offline Electron usage
+ * - Export accuracy
+ * - Document-style dashboard persistence (later)
  */
 
-export type TimeGranularity = "day" | "month" | "year";
+/* -------------------- Types -------------------- */
+
+export type FilterMap = Record<string, any>;
 
 export interface InteractionState {
-  timeGranularity: TimeGranularity;
-  slicers: Record<string, string | string[]>;
-  visualTypes: Record<string, string>;
+  /* -------- FILTERS -------- */
+
+  // Global slicers (apply to all widgets)
+  globalFilters: FilterMap;
+
+  // Advanced per-widget filters
+  widgetFilters: {
+    [widgetId: string]: FilterMap;
+  };
+
+  // Temporary filters applied during analysis
+  // Still exportable and savable
+  sessionFilters: {
+    global?: FilterMap;
+    widget?: {
+      [widgetId: string]: FilterMap;
+    };
+  };
+
+  /* -------- CONTEXT -------- */
+
+  // Drill-down / drill-through context
+  drillContext: FilterMap | null;
+
+  /* -------- VISUAL STATE -------- */
+
+  // Visualization type per widget
+  visualTypes: {
+    [widgetId: string]: string;
+  };
+
+  // Widgets hidden by user
   hiddenWidgets: Set<string>;
-  drillContext: Record<string, unknown> | null;
 }
 
 export interface DashboardBlueprint {
@@ -33,6 +76,8 @@ export interface DashboardsUIState {
   redoStack: InteractionState[];
 }
 
+/* -------------------- Store -------------------- */
+
 type Listener = () => void;
 
 class DashboardsUIStore {
@@ -47,7 +92,7 @@ class DashboardsUIStore {
     redoStack: [],
   };
 
-  /* ---------------- subscriptions ---------------- */
+  /* -------- Subscriptions -------- */
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
@@ -58,7 +103,7 @@ class DashboardsUIStore {
     this.listeners.forEach((l) => l());
   }
 
-  /* ---------------- getters ---------------- */
+  /* -------- State Access -------- */
 
   getState(): DashboardsUIState {
     return {
@@ -74,7 +119,7 @@ class DashboardsUIStore {
     };
   }
 
-  /* ---------------- lifecycle ---------------- */
+  /* -------- Lifecycle -------- */
 
   initialize(
     blueprint: DashboardBlueprint,
@@ -87,11 +132,12 @@ class DashboardsUIStore {
       dashboardCount,
       blueprint,
       interactionState: {
-        timeGranularity: "month",
-        slicers: {},
+        globalFilters: {},
+        widgetFilters: {},
+        sessionFilters: {},
+        drillContext: null,
         visualTypes: {},
         hiddenWidgets: new Set(),
-        drillContext: null,
       },
       undoStack: [],
       redoStack: [],
@@ -112,16 +158,26 @@ class DashboardsUIStore {
     this.emit();
   }
 
-  /* ---------------- interaction ---------------- */
+  /* -------- Interaction Updates -------- */
 
+  /**
+   * Centralized interaction update.
+   * Every change is:
+   * - Undoable
+   * - Redoable
+   * - Export-safe
+   */
   updateInteraction(
     updater: (prev: InteractionState) => InteractionState
   ): void {
     if (!this.state.interactionState) return;
 
+    // Save for undo
     this.state.undoStack.push(
       structuredClone(this.state.interactionState)
     );
+
+    // New action invalidates redo history
     this.state.redoStack = [];
 
     this.state.interactionState = updater(
@@ -131,7 +187,7 @@ class DashboardsUIStore {
     this.emit();
   }
 
-  /* ---------------- undo / redo ---------------- */
+  /* -------- Undo / Redo -------- */
 
   undo(): void {
     if (
@@ -166,19 +222,24 @@ class DashboardsUIStore {
   }
 }
 
+/* -------------------- Public API -------------------- */
+
 const store = new DashboardsUIStore();
 
 export const dashboardsUI = {
   subscribe: (l: Listener) => store.subscribe(l),
   getState: () => store.getState(),
+
   initialize: (
     blueprint: DashboardBlueprint,
     count: number
   ) => store.initialize(blueprint, count),
+
   updateInteraction: (
     updater: (prev: InteractionState) => InteractionState
   ) => store.updateInteraction(updater),
+
   undo: () => store.undo(),
-  redo: () => store.redo(), // ✅ ADDED
+  redo: () => store.redo(),
   reset: () => store.reset(),
 };
