@@ -1,59 +1,31 @@
 /**
  * Dashboards UI Store
  * -------------------
- * Single source of truth for all dashboard interaction state.
+ * Single source of truth for dashboard interaction state.
  * Supports:
- * - Global filters
- * - Widget-level filters
- * - Session (temporary) filters
- * - Drill-down / drill-through context
+ * - Filters
  * - Visualization state
- * - Hidden widgets
  * - Undo / Redo
- *
- * Designed for:
- * - Offline Electron usage
- * - Export accuracy
- * - Document-style dashboard persistence (later)
+ * - Persistence (frontend)
  */
-
-/* -------------------- Types -------------------- */
 
 export type FilterMap = Record<string, any>;
 
 export interface InteractionState {
-  /* -------- FILTERS -------- */
-
-  // Global slicers (apply to all widgets)
   globalFilters: FilterMap;
-
-  // Advanced per-widget filters
   widgetFilters: {
     [widgetId: string]: FilterMap;
   };
-
-  // Temporary filters applied during analysis
-  // Still exportable and savable
   sessionFilters: {
     global?: FilterMap;
     widget?: {
       [widgetId: string]: FilterMap;
     };
   };
-
-  /* -------- CONTEXT -------- */
-
-  // Drill-down / drill-through context
   drillContext: FilterMap | null;
-
-  /* -------- VISUAL STATE -------- */
-
-  // Visualization type per widget
   visualTypes: {
     [widgetId: string]: string;
   };
-
-  // Widgets hidden by user
   hiddenWidgets: Set<string>;
 }
 
@@ -76,8 +48,6 @@ export interface DashboardsUIState {
   redoStack: InteractionState[];
 }
 
-/* -------------------- Store -------------------- */
-
 type Listener = () => void;
 
 class DashboardsUIStore {
@@ -92,18 +62,18 @@ class DashboardsUIStore {
     redoStack: [],
   };
 
-  /* -------- Subscriptions -------- */
+  /* ---------- Subscriptions ---------- */
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private emit(): void {
+  private emit() {
     this.listeners.forEach((l) => l());
   }
 
-  /* -------- State Access -------- */
+  /* ---------- State Access ---------- */
 
   getState(): DashboardsUIState {
     return {
@@ -119,7 +89,7 @@ class DashboardsUIStore {
     };
   }
 
-  /* -------- Lifecycle -------- */
+  /* ---------- Lifecycle ---------- */
 
   initialize(
     blueprint: DashboardBlueprint,
@@ -158,26 +128,16 @@ class DashboardsUIStore {
     this.emit();
   }
 
-  /* -------- Interaction Updates -------- */
+  /* ---------- Interaction ---------- */
 
-  /**
-   * Centralized interaction update.
-   * Every change is:
-   * - Undoable
-   * - Redoable
-   * - Export-safe
-   */
   updateInteraction(
     updater: (prev: InteractionState) => InteractionState
   ): void {
     if (!this.state.interactionState) return;
 
-    // Save for undo
     this.state.undoStack.push(
       structuredClone(this.state.interactionState)
     );
-
-    // New action invalidates redo history
     this.state.redoStack = [];
 
     this.state.interactionState = updater(
@@ -187,28 +147,27 @@ class DashboardsUIStore {
     this.emit();
   }
 
-  /* -------- Undo / Redo -------- */
+  /* ---------- Undo / Redo ---------- */
 
   undo(): void {
     if (
-      this.state.undoStack.length === 0 ||
-      !this.state.interactionState
+      !this.state.interactionState ||
+      this.state.undoStack.length === 0
     )
       return;
 
-    const previous = this.state.undoStack.pop()!;
+    const prev = this.state.undoStack.pop()!;
     this.state.redoStack.push(
       structuredClone(this.state.interactionState)
     );
-
-    this.state.interactionState = previous;
+    this.state.interactionState = prev;
     this.emit();
   }
 
   redo(): void {
     if (
-      this.state.redoStack.length === 0 ||
-      !this.state.interactionState
+      !this.state.interactionState ||
+      this.state.redoStack.length === 0
     )
       return;
 
@@ -216,13 +175,26 @@ class DashboardsUIStore {
     this.state.undoStack.push(
       structuredClone(this.state.interactionState)
     );
-
     this.state.interactionState = next;
+    this.emit();
+  }
+
+  /* ---------- Persistence ---------- */
+
+  saveDashboard(): InteractionState | null {
+    if (!this.state.interactionState) return null;
+    return structuredClone(this.state.interactionState);
+  }
+
+  loadDashboard(saved: InteractionState): void {
+    this.state.interactionState = structuredClone(saved);
+    this.state.undoStack = [];
+    this.state.redoStack = [];
     this.emit();
   }
 }
 
-/* -------------------- Public API -------------------- */
+/* ---------- Public API ---------- */
 
 const store = new DashboardsUIStore();
 
@@ -242,4 +214,8 @@ export const dashboardsUI = {
   undo: () => store.undo(),
   redo: () => store.redo(),
   reset: () => store.reset(),
+
+  save: () => store.saveDashboard(),
+  load: (state: InteractionState) =>
+    store.loadDashboard(state),
 };

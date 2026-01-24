@@ -1,39 +1,47 @@
 /**
- * Exports UI Store (Internal)
- *
- * Tracks available exported reports.
+ * Exports UI Store
+ * ----------------
+ * Frontend contract for export operations.
+ * Backend-ready.
  */
 
-export interface ExportsUIState {
-  totalReports: number;
+import type { InteractionState } from "./dashboards_ui_store";
+
+export type ExportScope =
+  | "insights"
+  | "dashboard"
+  | "both";
+
+export type ExportFormat =
+  | "pdf"
+  | "excel";
+
+export interface ExportRequest {
+  runId: string;
+  scope: ExportScope;
+  format: ExportFormat;
+  dashboardState?: InteractionState | null;
 }
 
 class ExportsUIStore {
-  private state: ExportsUIState = {
-    totalReports: 0,
-  };
+  export(request: ExportRequest): Promise<void> {
+    // FRONTEND MOCK (Electron-safe)
+    return new Promise((resolve) => {
+      console.log("EXPORT REQUEST", request);
 
-  getState(): ExportsUIState {
-    return { ...this.state };
-  }
+      // Later:
+      // - Call IPC
+      // - Generate PDF / Excel
+      // - Ask file save location
 
-  setTotalReports(count: number): void {
-    this.state.totalReports = count;
-  }
-
-  reset(): void {
-    this.state.totalReports = 0;
+      setTimeout(() => {
+        alert(
+          `Export successful\n\nRun: ${request.runId}\nScope: ${request.scope}\nFormat: ${request.format}`
+        );
+        resolve();
+      }, 500);
+    });
   }
 }
 
-const exportsUIStore = new ExportsUIStore();
-
-/**
- * Public interface for exports UI state.
- */
-export const exportsUI = {
-  getState: (): ExportsUIState => exportsUIStore.getState(),
-  setTotalReports: (count: number): void =>
-    exportsUIStore.setTotalReports(count),
-  reset: (): void => exportsUIStore.reset(),
-};
+export const exportsUI = new ExportsUIStore();

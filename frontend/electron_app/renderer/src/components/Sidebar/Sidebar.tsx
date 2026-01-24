@@ -50,6 +50,7 @@ const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
               fontSize: "12px",
               color: "#c7d2fe",
               opacity: 0.9,
+              textAlign:"center",
             }}
           >
             Advanced
@@ -71,6 +72,7 @@ const link: React.CSSProperties = {
   marginBottom: "12px",
   fontSize: "14px",
   fontWeight: 500,
+  textAlign:"center"
 };
 
 const subLink: React.CSSProperties = {

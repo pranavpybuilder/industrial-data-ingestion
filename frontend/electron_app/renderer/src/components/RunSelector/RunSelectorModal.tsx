@@ -25,6 +25,7 @@ export function RunSelectorModal({ onClose }: Props) {
     "sap_pm_iw29_2024_01_12.xlsx",
     "rfid_log_shiftA_2024_01_13.csv",
     "plc_snapshot_line2_2024_01_14.json",
+    "test_log.csv",
   ];
 
   return (
