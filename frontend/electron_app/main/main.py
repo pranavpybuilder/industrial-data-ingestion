@@ -1,12 +1,5 @@
 """
 Main desktop application entry point.
-
-Responsibilities:
-- Create and manage the application window
-- Load the frontend renderer
-- Register the Qt WebChannel bridge
-
-No business logic is allowed here.
 """
 
 import sys
@@ -16,6 +9,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# ✅ NOW imports will work
+from storage.connection import initialize_database
 
 from PySide6.QtWidgets import QApplication, QMainWindow
 from PySide6.QtCore import QUrl
@@ -46,7 +42,7 @@ class FrontendMainWindow(QMainWindow):
             / "frontend"
             / "electron_app"
             / "renderer"
-            / "build"
+            / "dist"
             / "index.html"
         )
 
@@ -84,6 +80,7 @@ class FrontendMainWindow(QMainWindow):
 
 
 def main() -> None:
+    initialize_database()
     app = QApplication(sys.argv)
 
     window = FrontendMainWindow()

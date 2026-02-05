@@ -84,6 +84,7 @@ All generated features must be registered in:
 - `registry/feature_registry.yaml`
 
 The registry captures:
+
 - Feature ownership
 - Source system
 - Entity mapping

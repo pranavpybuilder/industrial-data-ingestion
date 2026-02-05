@@ -1,5 +1,3 @@
-# ipc/runs_ipc.py
-
 from storage.repositories.run_repo import RunRepository
 
 run_repo = RunRepository()
@@ -19,3 +17,8 @@ def get_active_run_ipc():
         "success": True,
         "data": run,
     }
+
+
+def list_runs():
+    runs = run_repo.list_runs()
+    return [r["run_id"] for r in runs]

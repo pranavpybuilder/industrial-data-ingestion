@@ -33,7 +33,7 @@ const Dashboards = () => {
       w.widgetId,
       [
         { x: "Jan", y: 30 },
-        { x: "Feb", y: 45 },
+        { x: "Feb", y: 5 },
         { x: "Mar", y: 25 },
         { x: "Apr", y: 60 },
       ],

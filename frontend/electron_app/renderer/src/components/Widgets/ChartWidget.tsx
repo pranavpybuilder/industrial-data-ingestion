@@ -44,7 +44,7 @@ const ChartWidget = ({
               <Line
                 type="monotone"
                 dataKey="y"
-                stroke="#4f46e5"
+                stroke="#4740cd"
                 strokeWidth={2}
               />
             </LineChart>
