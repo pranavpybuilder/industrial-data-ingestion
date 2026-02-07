@@ -1,5 +1,3 @@
-// src/services/frontendApi.ts
-
 export interface RunMeta {
   run_id: string;
 }
@@ -13,8 +11,13 @@ export const frontendApi = {
     if (isDesktop) {
       return (window as any).frontendAPI.get_runs();
     }
+    return [];
+  },
 
-    // Browser dev fallback
+  async searchRuns(query: string): Promise<RunMeta[]> {
+    if (isDesktop) {
+      return (window as any).frontendAPI.search_runs(query);
+    }
     return [];
   },
 };

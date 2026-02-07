@@ -1,0 +1,28 @@
+*/__pycache__
+
+
+*.pyc
+node_modules/
+venv/
+.idea/
+.DS_Store
+
+# Python
+
+__pycache__/
+*.pyc
+
+# Word temp files
+
+~$*.docx
+~WRL*.tmp
+
+# Node
+
+node_modules/
+
+# Env
+
+.env
+
+test.py

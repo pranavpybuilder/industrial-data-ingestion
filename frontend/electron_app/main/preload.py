@@ -1,6 +1,6 @@
 from PySide6.QtCore import QObject, Slot
 
-from ipc.runs_ipc import list_runs
+from ipc.runs_ipc import list_runs, search_runs_ipc
 from ipc.insights_ipc import get_insights_ipc
 from ipc.dashboard_ipc import get_dashboard_for_run_ipc
 from ipc.data_health_ipc import get_data_health_ipc
@@ -19,6 +19,10 @@ class FrontendAPI(QObject):
     @Slot(result=list)
     def get_runs(self):
         return list_runs()
+
+    @Slot(str, result=list)
+    def search_runs(self, query: str):
+        return search_runs_ipc(query)
 
     # -----------------------------
     # Insights APIs

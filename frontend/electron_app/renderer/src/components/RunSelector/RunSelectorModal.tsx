@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import SearchBar from "../SearchBar/SearchBar";
 import { onRunChange } from "../../state/state_reset";
+import { frontendApi } from "../../services/frontendApi";
 
 interface RunMeta {
   run_id: string;
@@ -13,27 +14,29 @@ interface Props {
 const RunSelectorModal = ({ onClose }: Props) => {
   const [runs, setRuns] = useState<RunMeta[]>([]);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+
+  const fetchRuns = async (query: string) => {
+    setLoading(true);
+    try {
+      const result = await frontendApi.getRuns();
+      setRuns(result || []);
+    } catch (err) {
+      console.error("Search failed", err);
+      setRuns([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadRuns = async () => {
-      try {
-        const result = await window.frontendAPI.get_runs();
-        setRuns(result || []);
-      } catch (err) {
-        console.error("Failed to load runs", err);
-        setRuns([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadRuns();
+    fetchRuns("");
   }, []);
 
-  const filteredRuns = runs.filter((r) =>
-    r.run_id.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    const t = setTimeout(() => fetchRuns(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   return (
     <div
@@ -42,6 +45,7 @@ const RunSelectorModal = ({ onClose }: Props) => {
         borderRadius: "12px",
         padding: "20px",
         width: "420px",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.12)",
       }}
     >
       <h2 style={{ marginBottom: "12px" }}>Select Ingested File</h2>
@@ -53,13 +57,13 @@ const RunSelectorModal = ({ onClose }: Props) => {
       />
 
       <div style={{ maxHeight: "260px", overflowY: "auto" }}>
-        {loading && <p>Loading runs...</p>}
+        {loading && <p style={{ color: "#6b7280" }}>Searching…</p>}
 
-        {!loading && filteredRuns.length === 0 && (
+        {!loading && runs.length === 0 && (
           <p style={{ color: "#6b7280" }}>No matching runs found</p>
         )}
 
-        {filteredRuns.map((run) => (
+        {runs.map((run) => (
           <div
             key={run.run_id}
             onClick={() => {
@@ -72,7 +76,14 @@ const RunSelectorModal = ({ onClose }: Props) => {
               borderRadius: "8px",
               border: "1px solid #e5e7eb",
               cursor: "pointer",
+              transition: "background 0.15s",
             }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "#f9fafb")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "#ffffff")
+            }
           >
             {run.run_id}
           </div>
