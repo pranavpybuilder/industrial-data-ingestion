@@ -10,6 +10,8 @@ const DashboardToolBar = () => {
       <button
         disabled={state.undoStack.length === 0}
         onClick={() => dashboardsUI.undo()}
+        title="Undo"
+        aria-label="Undo"
       >
         <FiRotateCcw />
       </button>
@@ -17,6 +19,8 @@ const DashboardToolBar = () => {
       <button
         disabled={state.redoStack.length === 0}
         onClick={() => dashboardsUI.redo()}
+        title="Redo"
+        aria-label="Redo"
       >
         <FiRotateCw />
       </button>

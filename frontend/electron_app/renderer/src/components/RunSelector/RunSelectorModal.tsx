@@ -51,7 +51,7 @@ const RunSelectorModal = ({ onClose }: Props) => {
       <div className="modal-container" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">Select Ingested File</h2>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={onClose} aria-label="Close" title="Close">
             ×
           </button>
         </div>

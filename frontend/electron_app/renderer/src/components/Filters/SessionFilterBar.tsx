@@ -52,9 +52,11 @@ const SessionFilterBar = () => {
         background: "#eff6ff",
       }}
     >
-      <strong>Session Filter:</strong>
+      <label htmlFor="session-severity" style={{ fontWeight: 700 }}>Session Filter:</label>
 
       <select
+        id="session-severity"
+        title="Session severity filter"
         style={{ marginLeft: "0.5rem" }}
         value={currentValue}
         onChange={(e) => applyFilter(e.target.value)}

@@ -30,8 +30,9 @@ const DashboardSection = ({
         gridColumn: "span 6",
         background: "#ffffff",
         borderRadius: "12px",
-        padding: "16px",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        padding: "20px",
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
       }}
     >
       {/* Widget Controls */}
@@ -39,7 +40,11 @@ const DashboardSection = ({
         style={{
           display: "flex",
           justifyContent: "space-between",
-          marginBottom: "8px",
+          alignItems: "center",
+          marginBottom: "12px",
+          padding: "8px 12px",
+          background: "#f9fafb",
+          borderRadius: "8px",
         }}
       >
         <VisualizationSwitcher

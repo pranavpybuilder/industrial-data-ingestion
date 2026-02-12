@@ -37,6 +37,7 @@ const RunSelector = () => {
       <input
         type="text"
         placeholder="Search runs..."
+        aria-label="Search runs"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         disabled={loading}

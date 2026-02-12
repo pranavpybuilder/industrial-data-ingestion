@@ -176,6 +176,34 @@ class RunRepository:
         }
 
     # --------------------------------------------------
+    # GET ACTIVE RUN (PROCESSING status)
+    # --------------------------------------------------
+    def get_active_run(self) -> Optional[Dict]:
+        conn = get_connection()
+
+        row = conn.execute(
+            """
+            SELECT run_id, run_name, source_type, created_at, status
+            FROM runs
+            WHERE status = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (RunStatus.PROCESSING,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "run_id": row[0],
+            "run_name": row[1],
+            "source_type": row[2],
+            "created_at": row[3],
+            "status": row[4],
+        }
+
+    # --------------------------------------------------
     # DELETE RUN (SAFE)
     # --------------------------------------------------
     def delete_run(self, run_id: str) -> None:

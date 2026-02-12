@@ -1,42 +1,134 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+/* ═══════════════════════════════════════════════════════════
+   OFFLINE INTELLIGENCE  ·  Global App Styles
+   ═══════════════════════════════════════════════════════════ */
+
+/* ---------- CSS Custom Properties (Design Tokens) ---------- */
+:root {
+  /* Brand */
+  --c-primary:     #6366f1;
+  --c-primary-dk:  #4f46e5;
+  --c-primary-lt:  #818cf8;
+  --c-accent:      #8b5cf6;
+
+  /* Surfaces */
+  --c-bg-app:      #f0f1f5;
+  --c-bg-card:     #ffffff;
+  --c-bg-sidebar:  #111024;
+
+  /* Text */
+  --c-text:        #111827;
+  --c-text-2:      #6b7280;
+  --c-text-muted:  #9ca3af;
+  --c-text-on-dark:#e0e7ff;
+
+  /* Borders */
+  --c-border:      #e5e7eb;
+  --c-border-focus:#6366f1;
+
+  /* Semantic */
+  --c-success:     #10b981;
+  --c-error:       #ef4444;
+  --c-warning:     #f59e0b;
+
+  /* Radius */
+  --r-sm:  6px;
+  --r-md:  8px;
+  --r-lg:  12px;
+  --r-xl:  16px;
+
+  /* Shadows */
+  --s-sm:  0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --s-md:  0 4px 12px rgba(0,0,0,0.08);
+  --s-lg:  0 10px 25px rgba(0,0,0,0.10);
+
+  /* Transitions */
+  --t-fast:   all 0.15s ease;
+  --t-normal: all 0.2s ease;
+  --t-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+/* ---------- Interactive element defaults ---------- */
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: var(--t-fast);
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
+button:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
 }
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+button:active {
+  transform: translateY(0px) scale(0.98);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+select, input[type="text"], input[type="search"] {
+  font-family: inherit;
+  transition: var(--t-fast);
+}
+select:focus, input:focus {
+  outline: none;
+  border-color: var(--c-border-focus);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+/* ---------- Scrollbar styling ---------- */
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 100px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
 }
 
-.card {
-  padding: 2em;
+/* ---------- Animations ---------- */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.read-the-docs {
-  color: #888;
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fadeIn  { animation: fadeIn  0.3s ease-out; }
+.animate-slideUp { animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* ---------- Utility ---------- */
+
+.card-hover:hover {
+  box-shadow: var(--s-lg);
+  transform: translateY(-2px);
+  border-color: var(--c-primary-lt) !important;
 }

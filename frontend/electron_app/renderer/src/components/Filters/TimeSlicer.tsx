@@ -17,8 +17,10 @@ const TimeSlicer = () => {
 
   return (
     <div>
-      <label>Time Granularity</label>
+      <label htmlFor="time-granularity">Time Granularity</label>
       <select
+        id="time-granularity"
+        title="Time granularity"
         value={interaction.timeGranularity}
         onChange={(e) =>
           onChange(e.target.value as "day" | "month" | "year")

@@ -1,5 +1,13 @@
 import { useState, useSyncExternalStore } from "react";
+import { FiDownload, FiCheckCircle, FiAlertCircle } from "react-icons/fi";
 import { runUI } from "../../state/run_ui_store";
+
+const fadeKeyframes = `
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+`;
 
 /**
  * Exports Page
@@ -44,99 +52,120 @@ const Exports = () => {
   }
 
   return (
-    <section style={styles.page}>
-      {/* Header */}
-      <header style={styles.header}>
-        <h1 style={styles.title}>Exports</h1>
-        <p style={styles.subtitle}>
-          Export data for <strong>{activeRun}</strong>
-        </p>
-      </header>
+    <>
+      <style>{fadeKeyframes}</style>
+      <section style={styles.page}>
+        {/* Header */}
+        <header style={styles.header}>
+          <div style={styles.headerIcon}>
+            <FiDownload size={22} color="#6366f1" />
+          </div>
+          <div>
+            <h1 style={styles.title}>Exports</h1>
+            <p style={styles.subtitle}>
+              Export data for <strong>{activeRun}</strong>
+            </p>
+          </div>
+        </header>
 
-      {/* Export Options */}
-      <div style={styles.card}>
-        <h3 style={styles.cardTitle}>Export Options</h3>
+        {/* Export Options */}
+        <div style={styles.card}>
+          <h3 style={styles.cardTitle}>Export Options</h3>
 
-        {/* Scope */}
-        <div style={styles.group}>
-          <label style={styles.label}>
-            What do you want to export?
-          </label>
+          {/* Scope */}
+          <div style={styles.group}>
+            <label style={styles.label} htmlFor="export-scope">
+              What do you want to export?
+            </label>
 
-          <select
-            style={styles.select}
-            value={exportScope}
-            onChange={(e) =>
-              setExportScope(
-                e.target.value as typeof exportScope
-              )
-            }
+            <select
+              id="export-scope"
+              title="Export scope"
+              style={styles.select}
+              value={exportScope}
+              onChange={(e) =>
+                setExportScope(
+                  e.target.value as typeof exportScope
+                )
+              }
+            >
+              <option value="">Select option</option>
+              <option value="insights">
+                Insights only
+              </option>
+              <option value="dashboards">
+                Dashboards only
+              </option>
+              <option value="both">
+                Insights & Dashboards
+              </option>
+            </select>
+          </div>
+
+          {/* Format */}
+          <div style={styles.group}>
+            <label style={styles.label} htmlFor="export-format">
+              Export format
+            </label>
+
+            <select
+              id="export-format"
+              title="Export format"
+              style={styles.select}
+              value={format}
+              onChange={(e) =>
+                setFormat(
+                  e.target.value as typeof format
+                )
+              }
+            >
+              <option value="">Select format</option>
+              <option value="excel">Excel (.xlsx)</option>
+              <option value="pdf">PDF (.pdf)</option>
+            </select>
+          </div>
+
+          {/* Action */}
+          <button
+            style={{
+              ...styles.primaryBtn,
+              opacity:
+                exportScope && format ? 1 : 0.5,
+              cursor:
+                exportScope && format
+                  ? "pointer"
+                  : "not-allowed",
+            }}
+            disabled={!exportScope || !format}
+            onClick={handleExport}
+            onMouseEnter={(e) => {
+              if (exportScope && format) e.currentTarget.style.background = "#4f46e5";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#6366f1";
+            }}
           >
-            <option value="">Select option</option>
-            <option value="insights">
-              Insights only
-            </option>
-            <option value="dashboards">
-              Dashboards only
-            </option>
-            <option value="both">
-              Insights & Dashboards
-            </option>
-          </select>
+            <FiDownload size={14} />
+            Export
+          </button>
+
+          {/* Status */}
+          {status === "success" && (
+            <div style={styles.successBanner}>
+              <FiCheckCircle size={16} color="#10b981" />
+              Export completed successfully.
+            </div>
+          )}
+
+          {status === "failed" && (
+            <div style={styles.errorBanner}>
+              <FiAlertCircle size={16} color="#ef4444" />
+              Export failed. Please try again.
+            </div>
+          )}
         </div>
-
-        {/* Format */}
-        <div style={styles.group}>
-          <label style={styles.label}>
-            Export format
-          </label>
-
-          <select
-            style={styles.select}
-            value={format}
-            onChange={(e) =>
-              setFormat(
-                e.target.value as typeof format
-              )
-            }
-          >
-            <option value="">Select format</option>
-            <option value="excel">Excel (.xlsx)</option>
-            <option value="pdf">PDF (.pdf)</option>
-          </select>
-        </div>
-
-        {/* Action */}
-        <button
-          style={{
-            ...styles.primaryBtn,
-            opacity:
-              exportScope && format ? 1 : 0.5,
-            cursor:
-              exportScope && format
-                ? "pointer"
-                : "not-allowed",
-          }}
-          disabled={!exportScope || !format}
-          onClick={handleExport}
-        >
-          Export
-        </button>
-
-        {/* Status */}
-        {status === "success" && (
-          <p style={styles.successText}>
-            Export completed successfully.
-          </p>
-        )}
-
-        {status === "failed" && (
-          <p style={styles.errorText}>
-            Export failed. Please try again.
-          </p>
-        )}
-      </div>
-    </section>
+      </section>
+    </>
   );
 };
 
@@ -145,74 +174,123 @@ const Exports = () => {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     maxWidth: "700px",
+    animation: "fadeIn 0.3s ease-out",
   },
 
   header: {
-    marginBottom: "24px",
+    display: "flex",
+    alignItems: "center",
+    gap: "14px",
+    marginBottom: "28px",
+  },
+
+  headerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    background: "#eef2ff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   },
 
   title: {
-    fontSize: "24px",
-    fontWeight: 600,
-    marginBottom: "4px",
+    fontSize: "22px",
+    fontWeight: 700,
+    color: "#111827",
+    margin: 0,
   },
 
   subtitle: {
     fontSize: "14px",
-    color: "#4b5563",
+    color: "#6b7280",
+    margin: 0,
+    marginTop: 2,
   },
 
   card: {
     background: "#ffffff",
-    borderRadius: "8px",
-    padding: "20px",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    borderRadius: "12px",
+    padding: "24px",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
   },
 
   cardTitle: {
-    fontSize: "16px",
+    fontSize: "15px",
     fontWeight: 600,
-    marginBottom: "16px",
+    marginBottom: "20px",
+    color: "#111827",
   },
 
   group: {
-    marginBottom: "16px",
+    marginBottom: "18px",
   },
 
   label: {
     display: "block",
     fontSize: "14px",
+    fontWeight: 500,
     marginBottom: "6px",
+    color: "#111827",
   },
 
   select: {
     width: "100%",
-    padding: "8px",
+    padding: "10px",
     fontSize: "14px",
-    borderRadius: "6px",
-    border: "1px solid #d1d5db",
+    borderRadius: "8px",
+    border: "1.5px solid #e5e7eb",
+    background: "#ffffff",
+    color: "#111827",
+    outline: "none",
+    appearance: "auto" as any,
+    transition: "border-color 0.15s",
   },
 
   primaryBtn: {
     background: "#6366f1",
     color: "#ffffff",
     border: "none",
-    borderRadius: "6px",
-    padding: "10px 16px",
+    borderRadius: "8px",
+    padding: "10px 20px",
     fontSize: "14px",
+    fontWeight: 500,
     marginTop: "8px",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    transition: "background 0.15s",
   },
 
-  successText: {
-    marginTop: "12px",
+  successBanner: {
+    marginTop: "16px",
+    padding: "12px 16px",
+    background: "#ecfdf5",
+    borderLeft: "4px solid #10b981",
+    borderRadius: "8px",
     color: "#065f46",
     fontSize: "14px",
+    fontWeight: 500,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
   },
 
-  errorText: {
-    marginTop: "12px",
+  errorBanner: {
+    marginTop: "16px",
+    padding: "12px 16px",
+    background: "#fef2f2",
+    borderLeft: "4px solid #ef4444",
+    borderRadius: "8px",
     color: "#991b1b",
     fontSize: "14px",
+    fontWeight: 500,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
   },
 };
 
