@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { onRunChange } from "../../state/state_reset";
+import { runUI } from "../../state/run_ui_store";
 import { useRunUI } from "../../state/useRunUI";
 import { frontendApi, RunMeta } from "../../services/frontendApi";
 
 const RunSelector = () => {
   const { activeRunId } = useRunUI();
-
   const [runs, setRuns] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -22,7 +21,6 @@ const RunSelector = () => {
         setLoading(false);
       }
     };
-
     fetchRuns();
   }, []);
 
@@ -32,7 +30,7 @@ const RunSelector = () => {
 
   return (
     <div style={{ padding: "12px" }}>
-      <p style={{ fontSize: "13px", marginBottom: "8px" }}>
+      <p style={{ fontSize: "13px", marginBottom: "8px", color: "#4b5563", fontWeight: 500 }}>
         {activeRunId ?? "No run selected"}
       </p>
 
@@ -44,34 +42,41 @@ const RunSelector = () => {
         disabled={loading}
         style={{
           width: "100%",
-          padding: "6px 8px",
+          padding: "8px 10px",
           marginBottom: "8px",
-          borderRadius: "6px",
+          borderRadius: "8px",
           border: "1px solid #d1d5db",
-          fontSize: "12px",
+          fontSize: "13px",
+          outline: "none",
         }}
       />
 
       <div style={{ maxHeight: "120px", overflowY: "auto" }}>
-        {loading && <p>Loading runs...</p>}
+        {loading && <p style={{ fontSize: "12px", color: "#6b7280" }}>Loading...</p>}
 
         {!loading && filteredRuns.length === 0 && (
-          <p>No runs found</p>
+          <p style={{ fontSize: "12px", color: "#6b7280" }}>
+            {search ? `No matching runs for "${search}"` : "No runs found"}
+          </p>
         )}
 
         {filteredRuns.map((runId) => (
           <button
             key={runId}
-            onClick={() => onRunChange(runId)}
+            onClick={() => runUI.setActiveRun(runId)}
             style={{
               width: "100%",
               textAlign: "left",
-              padding: "6px 8px",
+              padding: "8px 10px",
               marginBottom: "4px",
-              borderRadius: "6px",
+              borderRadius: "8px",
               border: "1px solid #e5e7eb",
-              background:
-                runId === activeRunId ? "#e0f2fe" : "#ffffff",
+              background: runId === activeRunId ? "#eff6ff" : "#ffffff",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontFamily: "monospace",
+              color: runId === activeRunId ? "#1d4ed8" : "#374151",
+              fontWeight: runId === activeRunId ? 600 : 400,
             }}
           >
             {runId}
@@ -81,14 +86,18 @@ const RunSelector = () => {
 
       {activeRunId && (
         <button
-          onClick={() => onRunChange("")}
+          onClick={() => runUI.clearRun()}
           style={{
             width: "100%",
-            marginTop: "6px",
-            padding: "6px",
-            borderRadius: "6px",
+            marginTop: "8px",
+            padding: "8px",
+            borderRadius: "8px",
             border: "1px solid #ef4444",
             background: "#fee2e2",
+            color: "#b91c1c",
+            fontSize: "12px",
+            fontWeight: 500,
+            cursor: "pointer",
           }}
         >
           Clear Active Run

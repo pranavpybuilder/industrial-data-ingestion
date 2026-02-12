@@ -12,8 +12,7 @@ export function RunGuard({ children }: { children: React.ReactNode }) {
       <div style={container}>
         <h2 style={title}>No ingestion run selected</h2>
         <p style={subtitle}>
-          Please select an ingestion run from the Home page to access this
-          section.
+          Please select an ingestion run from the Home page to access this section.
         </p>
       </div>
     );
@@ -21,8 +20,6 @@ export function RunGuard({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>;
 }
-
-/* ---------------- Styles ---------------- */
 
 const container: React.CSSProperties = {
   padding: "48px 32px",

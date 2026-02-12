@@ -1,4 +1,3 @@
-// src/state/run_ui_store.ts
 export interface RunUIState {
   activeRunId: string | null;
 }
@@ -10,10 +9,8 @@ class RunUIStore {
 
   private listeners = new Set<() => void>();
 
-  /** ✅ STABLE SNAPSHOT */
   getSnapshot = (): RunUIState => this.state;
 
-  /** ✅ STABLE SUBSCRIBE */
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -24,13 +21,13 @@ class RunUIStore {
   }
 
   setActiveRun(runId: string) {
-    if (this.state.activeRunId === runId) return; // 🛑 GUARD
+    if (this.state.activeRunId === runId) return;
     this.state = { activeRunId: runId };
     this.emit();
   }
 
   clearRun() {
-    if (this.state.activeRunId === null) return; // 🛑 GUARD
+    if (this.state.activeRunId === null) return;
     this.state = { activeRunId: null };
     this.emit();
   }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import SearchBar from "../SearchBar/SearchBar";
-import { onRunChange } from "../../state/state_reset";
+import { runUI } from "../../state/run_ui_store";
 import { frontendApi } from "../../services/frontendApi";
+import "./RunSelectorModal.css";
 
 interface RunMeta {
   run_id: string;
@@ -16,13 +17,13 @@ const RunSelectorModal = ({ onClose }: Props) => {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const fetchRuns = async (query: string) => {
+  const fetchRuns = async () => {
     setLoading(true);
     try {
       const result = await frontendApi.getRuns();
       setRuns(result || []);
     } catch (err) {
-      console.error("Search failed", err);
+      console.error("Failed to fetch runs", err);
       setRuns([]);
     } finally {
       setLoading(false);
@@ -30,78 +31,88 @@ const RunSelectorModal = ({ onClose }: Props) => {
   };
 
   useEffect(() => {
-    fetchRuns("");
+    fetchRuns();
   }, []);
 
-  useEffect(() => {
-    const t = setTimeout(() => fetchRuns(search), 250);
-    return () => clearTimeout(t);
-  }, [search]);
+  const filteredRuns = runs.filter((run) => {
+    if (!search.trim()) return true;
+    const searchLower = search.toLowerCase().trim();
+    const runIdLower = run.run_id.toLowerCase();
+    return runIdLower.includes(searchLower);
+  });
+
+  const handleSelectRun = (runId: string) => {
+    runUI.setActiveRun(runId);
+    onClose();
+  };
 
   return (
-    <div
-      style={{
-        background: "#ffffff",
-        borderRadius: "12px",
-        padding: "20px",
-        width: "420px",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.12)",
-      }}
-    >
-      <h2 style={{ marginBottom: "12px" }}>Select Ingested File</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Select Ingested File</h2>
+          <button className="close-btn" onClick={onClose}>
+            ×
+          </button>
+        </div>
 
-      <SearchBar
-        value={search}
-        placeholder="Search run / file..."
-        onChange={setSearch}
-      />
-
-      <div style={{ maxHeight: "260px", overflowY: "auto" }}>
-        {loading && <p style={{ color: "#6b7280" }}>Searching…</p>}
-
-        {!loading && runs.length === 0 && (
-          <p style={{ color: "#6b7280" }}>No matching runs found</p>
-        )}
-
-        {runs.map((run) => (
-          <div
-            key={run.run_id}
-            onClick={() => {
-              onRunChange(run.run_id);
-              onClose();
-            }}
-            style={{
-              padding: "10px",
-              marginBottom: "8px",
-              borderRadius: "8px",
-              border: "1px solid #e5e7eb",
-              cursor: "pointer",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "#f9fafb")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.background = "#ffffff")
-            }
-          >
-            {run.run_id}
+        <div className="modal-body">
+          <div className="search-wrapper">
+            <SearchBar
+              value={search}
+              placeholder="Search run / file..."
+              onChange={setSearch}
+            />
           </div>
-        ))}
-      </div>
 
-      <button
-        onClick={onClose}
-        style={{
-          marginTop: "12px",
-          background: "transparent",
-          border: "none",
-          color: "#2563eb",
-          cursor: "pointer",
-        }}
-      >
-        Cancel
-      </button>
+          <div className="runs-list-container">
+            {loading && (
+              <div className="state-message">
+                <div className="spinner"></div>
+                <p>Loading runs...</p>
+              </div>
+            )}
+
+            {!loading && filteredRuns.length === 0 && (
+              <div className="state-message empty">
+                <p className="empty-text">
+                  {search
+                    ? `No runs found matching "${search}"`
+                    : "No runs available"}
+                </p>
+                {search && (
+                  <button
+                    className="clear-search-btn"
+                    onClick={() => setSearch("")}
+                  >
+                    Clear search
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!loading &&
+              filteredRuns.map((run) => (
+                <div
+                  key={run.run_id}
+                  className="run-item"
+                  onClick={() => handleSelectRun(run.run_id)}
+                >
+                  <div className="run-details">
+                    <span className="run-id">{run.run_id}</span>
+                  </div>
+                  <div className="run-arrow">→</div>
+                </div>
+              ))}
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="cancel-btn" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
