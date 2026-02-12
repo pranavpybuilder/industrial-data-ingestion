@@ -1,0 +1,828 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    OFFLINE INTELLIGENCE SYSTEM                             ║
+║                    Complete Module Documentation                           ║
+║                    Industrial Data Ingestion Platform                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Last Updated: 2025
+Project: Offline Industrial Data Intelligence System
+Stack: Python 3.12 + DuckDB + React 19 + TypeScript + Vite + Electron (PySide6)
+
+
+════════════════════════════════════════════════════════════════════════════════
+TABLE OF CONTENTS
+════════════════════════════════════════════════════════════════════════════════
+
+  1.  PROJECT OVERVIEW
+  2.  ARCHITECTURE SUMMARY
+  3.  MODULE 1 — INGESTION LAYER           [COMPLETED]
+  4.  MODULE 2 — PROFILING LAYER           [PENDING]
+  5.  MODULE 3 — RULE-BASED ENGINE         [PENDING]
+  6.  MODULE 4 — ML ENGINE                 [PENDING]
+  7.  MODULE 5 — ORCHESTRATION / INSIGHTS  [PENDING]
+  8.  MODULE 6 — DASHBOARD ENGINE          [PENDING]
+  9.  MODULE 7 — EXPORT LAYER              [PENDING]
+  10. MODULE 8 — APP WIRING & FINAL        [PENDING]
+  11. FRONTEND REDESIGN                    [COMPLETED]
+  12. PROBLEM RESOLUTION (214 WARNINGS)   [COMPLETED]
+  13. DATABASE SCHEMA
+  14. FILE STRUCTURE REFERENCE
+
+
+════════════════════════════════════════════════════════════════════════════════
+1. PROJECT OVERVIEW
+════════════════════════════════════════════════════════════════════════════════
+
+This is a fully OFFLINE desktop application designed for industrial plant
+operations teams. It ingests structured data from multiple industrial sources
+(PLC telemetry, SAP PM orders, RFID logs, Excel reports, energy readings),
+profiles the data, applies rule-based and ML-based analysis, generates
+actionable insights, builds auto-generated dashboards, and exports reports —
+all without any internet connection.
+
+Key Principles:
+  • 100% offline — no cloud dependency
+  • DuckDB embedded database — zero setup
+  • Desktop-first UI — React + Electron shell
+  • Modular architecture — each layer is independently testable
+  • Run-based workflow — every ingestion creates a "run" that flows through
+    all downstream modules
+
+
+════════════════════════════════════════════════════════════════════════════════
+2. ARCHITECTURE SUMMARY
+════════════════════════════════════════════════════════════════════════════════
+
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐
+│  INGESTION  │────▶│  PROFILING   │────▶│ RULE ENGINE  │
+│  (Module 1) │     │  (Module 2)  │     │  (Module 3)  │
+└─────────────┘     └──────────────┘     └──────┬───────┘
+                                                │
+┌─────────────┐     ┌──────────────┐            │
+│  DASHBOARD  │◀────│ ORCHESTRATOR │◀───────────┘
+│  (Module 6) │     │  (Module 5)  │◀─────┐
+└──────┬──────┘     └──────────────┘      │
+       │                            ┌─────┴────────┐
+       ▼                            │  ML ENGINE   │
+┌─────────────┐                     │  (Module 4)  │
+│   EXPORT    │                     └──────────────┘
+│  (Module 7) │
+└─────────────┘
+
+Storage Layer: DuckDB (storage/offline_endurance_intelligence.duckdb)
+Frontend:      React 19 + TypeScript + Vite (Electron renderer)
+IPC Bridge:    PySide6 desktop shell ↔ Python backend
+Config:        YAML-based feature catalogs and normalization configs
+
+
+════════════════════════════════════════════════════════════════════════════════
+3. MODULE 1 — INGESTION LAYER [COMPLETED]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Accept industrial data files, validate schemas, parse and normalize data,
+  store as versioned Parquet files, register runs in the database.
+
+Files Implemented:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                              │ Status    │ Description              │
+  ├───────────────────────────────────┼───────────┼──────────────────────────┤
+  │ utils/logger.py                   │ NEW       │ Console + rotating file  │
+  │                                   │           │ logger (DEBUG to file,   │
+  │                                   │           │ INFO to console)         │
+  │ utils/config_loader.py            │ NEW       │ YAML/JSON config loader  │
+  │                                   │           │ with path resolution     │
+  │ ingestion/base_ingestor.py        │ MODIFIED  │ Added _generate_schema   │
+  │                                   │           │ _hash() (SHA-256 of col  │
+  │                                   │           │ names + dtypes, 16 char) │
+  │ ingestion/upload_handler.py       │ NEW       │ Core upload handler with │
+  │                                   │           │ SOURCE_REGISTRY mapping  │
+  │                                   │           │ 5 source types to their  │
+  │                                   │           │ ingestor + schema paths. │
+  │                                   │           │ Auto-detects source type │
+  │                                   │           │ from extension + columns │
+  │ storage/repositories/             │ NEW       │ Long-format feature      │
+  │   feature_store_repo.py           │           │ persistence: save, get,  │
+  │                                   │           │ delete, summary          │
+  │ storage/repositories/run_repo.py  │ MODIFIED  │ Added get_active_run()   │
+  │ ipc/ingestion_ipc.py              │ MODIFIED  │ Added upload_file_ipc()  │
+  │ app/pipeline_runner.py            │ NEW       │ Full orchestrator:       │
+  │                                   │           │ ingest → create run →    │
+  │                                   │           │ save metadata → populate │
+  │                                   │           │ features → update status │
+  │ app/main.py                       │ NEW       │ CLI entry point:         │
+  │                                   │           │ python -m app.main       │
+  │                                   │           │ <file> [source_type]     │
+  └───────────────────────────────────┴───────────┴──────────────────────────┘
+
+Pre-Existing (already implemented before Module 1):
+  • 4 Readers: csv_reader, excel_reader, json_reader, log_reader
+  • 5 Source Ingestors: sap, plc, rfid, report_excel, operational_excel
+  • 3 Validators: schema_validator, type_validator, time_validator
+  • Versioning: run_id.py (UUID generator), data_versioner.py (Parquet)
+  • 7 JSON Schemas: plc, sap_iw29, rfid, excel, report_excel, 
+    operational_excel, power_cost
+  • Storage: connection.py (DuckDB singleton), schema.sql (7 tables)
+  • 6 Repositories: ingestion, run, insight, dashboard, export, profiling
+
+Source Type Auto-Detection:
+  The upload_handler.py automatically detects source types by:
+  1. File extension matching (.csv, .xlsx, .json, .log)
+  2. Column name peeking (reads first row headers)
+  3. Pattern matching against known column sets per source
+  
+  Supported sources:
+  • SAP     — SAP IW29 PM work orders
+  • PLC     — Machine telemetry (temperature, pressure, vibration)
+  • RFID    — RFID tag scan events
+  • EXCEL   — Operational spreadsheets
+  • ENERGY  — Power/cost readings
+
+Pipeline Flow:
+  1. User uploads file → upload_handler validates & auto-detects source
+  2. Appropriate ingestor parses file → validates against JSON schema
+  3. Data versioner creates Parquet file + metadata JSON
+  4. Pipeline runner creates a new "run" in DB
+  5. File metadata (schema_hash, row_count, columns) saved to ingested_files
+  6. Numeric columns extracted as long-format features → feature_store table
+  7. Run status updated to SUCCESS or FAILED
+
+Testing:
+  • PLC CSV (10 rows) — ingested successfully, schema hash c9ba2a05b14b9e74
+  • SAP CSV (5 rows) — auto-detected correctly
+
+
+════════════════════════════════════════════════════════════════════════════════
+4. MODULE 2 — PROFILING LAYER [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Analyze ingested data to understand column types, identify data quality
+  issues, compute statistical profiles, and generate health scores.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                           │ Description                            │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ profiling/column_classifier.py │ Classify columns as:                  │
+  │                                │ • Numeric (int, float)                │
+  │                                │ • Categorical (string with < N unique)│
+  │                                │ • Temporal (datetime/timestamp)       │
+  │                                │ • Identifier (unique per row)         │
+  │                                │ • Boolean (true/false/0/1)            │
+  │                                │ Output: dict[col_name → col_type]     │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ profiling/data_profiler.py     │ Compute per-column statistics:        │
+  │                                │ • missing_pct — % of nulls            │
+  │                                │ • mean, median, std, min, max         │
+  │                                │ • unique_count, top_values            │
+  │                                │ • outlier_count (IQR method)          │
+  │                                │ • distribution shape (skew, kurtosis) │
+  │                                │ Output: list[ColumnProfile]           │
+  ├────────────────────────────────┼────────────────────────────────────────┤
+  │ profiling/data_health.py       │ Generate overall health score:        │
+  │                                │ • Completeness (% non-null)           │
+  │                                │ • Consistency (type conformance)      │
+  │                                │ • Uniqueness (ID column uniqueness)   │
+  │                                │ • Validity (range checks)             │
+  │                                │ • Freshness (recency of timestamps)   │
+  │                                │ Output: HealthReport with 0-100 score │
+  └────────────────────────────────┴────────────────────────────────────────┘
+
+  Integration:
+  • Reads Parquet files from data versioner (ingestion output)
+  • Persists results to profiling_results table via profiling_repo
+  • Results feed into Rule Engine (Module 3) and Data Health page
+
+
+════════════════════════════════════════════════════════════════════════════════
+5. MODULE 3 — RULE-BASED ENGINE [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Apply domain-specific threshold rules and maintenance heuristics to
+  generate deterministic insights from profiled data.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                              │ Description                         │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ rule_engine/rule_base.py          │ Base rule class with:               │
+  │                                   │ • evaluate(data) → RuleResult       │
+  │                                   │ • severity (critical/warning/info)  │
+  │                                   │ • confidence score                  │
+  │                                   │ • human-readable explanation        │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ rule_engine/threshold_engine.py   │ Configurable threshold checks:      │
+  │                                   │ • Temperature > X°C → overheating   │
+  │                                   │ • Vibration > Y → bearing wear      │
+  │                                   │ • Downtime > Z min → investigation  │
+  │                                   │ Reads thresholds from YAML config   │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ rule_engine/maintenance_rules.py  │ Domain-specific maintenance rules:  │
+  │                                   │ • PM order overdue detection        │
+  │                                   │ • Repeated breakdown patterns       │
+  │                                   │ • Energy consumption anomalies      │
+  │                                   │ • RFID scan gap detection           │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ rule_engine/explainability.py     │ Generate human-readable text:       │
+  │                                   │ • Why this rule triggered           │
+  │                                   │ • What data caused the trigger      │
+  │                                   │ • Recommended action                │
+  │                                   │ • Confidence explanation            │
+  └───────────────────────────────────┴─────────────────────────────────────┘
+
+  Integration:
+  • Receives profiled data + features from Module 2
+  • Outputs rule results to Orchestrator (Module 5)
+  • Threshold configs stored as YAML in rule_engine/configs/
+
+
+════════════════════════════════════════════════════════════════════════════════
+6. MODULE 4 — ML ENGINE [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Apply machine learning models for anomaly detection, failure pattern
+  recognition, and time-series forecasting on industrial data.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                             │ Description                          │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ ml_engine/anomaly_detection.py   │ Unsupervised anomaly detection:      │
+  │                                  │ • Isolation Forest on numeric feats  │
+  │                                  │ • Z-score based outlier detection    │
+  │                                  │ • Output: list of anomalous rows     │
+  │                                  │   with anomaly_score                 │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ ml_engine/failure_patterns.py    │ Pattern recognition:                 │
+  │                                  │ • Clustering of failure events       │
+  │                                  │ • Correlation between variables      │
+  │                                  │   before failures                    │
+  │                                  │ • Recurring failure window detection │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ ml_engine/forecasting.py         │ Time-series prediction:              │
+  │                                  │ • Simple trend extrapolation         │
+  │                                  │ • Moving average forecast            │
+  │                                  │ • Remaining useful life estimation   │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ ml_engine/model_evaluator.py     │ Model quality assessment:            │
+  │                                  │ • Silhouette score for clustering    │
+  │                                  │ • Contamination ratio for anomaly    │
+  │                                  │ • Forecast accuracy metrics          │
+  ├──────────────────────────────────┼──────────────────────────────────────┤
+  │ ml_engine/model_registry.py      │ Model versioning and persistence:    │
+  │                                  │ • Save/load models (joblib/pickle)   │
+  │                                  │ • Track model versions per run       │
+  │                                  │ • Model metadata storage             │
+  └──────────────────────────────────┴──────────────────────────────────────┘
+
+  Technology:
+  • scikit-learn for all ML models (offline-compatible)
+  • No deep learning — must run on standard hardware
+  • Models saved as .joblib files alongside Parquet data
+
+
+════════════════════════════════════════════════════════════════════════════════
+7. MODULE 5 — ORCHESTRATION / INSIGHTS [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Combine rule-based and ML-based results, prioritize insights by severity,
+  score them, and produce the final insight feed for the UI.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                                │ Description                       │
+  ├─────────────────────────────────────┼───────────────────────────────────┤
+  │ orchestration/insight_orchestrator  │ Main orchestrator:                │
+  │   .py                              │ • Calls rule engine (Module 3)    │
+  │                                    │ • Calls ML engine (Module 4)      │
+  │                                    │ • Merges results                  │
+  │                                    │ • Deduplicates overlapping        │
+  │                                    │   insights                        │
+  │                                    │ • Returns unified insight list    │
+  ├─────────────────────────────────────┼───────────────────────────────────┤
+  │ orchestration/prioritization.py     │ Insight ranking:                  │
+  │                                    │ • Priority by severity            │
+  │                                    │ • Recency weighting               │
+  │                                    │ • Actionability score             │
+  │                                    │ • Top-K insight selection          │
+  ├─────────────────────────────────────┼───────────────────────────────────┤
+  │ orchestration/severity_scoring.py   │ Severity assessment:              │
+  │                                    │ • Critical / Warning / Info       │
+  │                                    │ • Multi-factor scoring            │
+  │                                    │ • Threshold multipliers           │
+  └─────────────────────────────────────┴───────────────────────────────────┘
+
+  Integration:
+  • Reads from feature_store, profiling_results
+  • Writes to insights table via insight_repo
+  • Data consumed by Insights page and Dashboard Engine
+
+
+════════════════════════════════════════════════════════════════════════════════
+8. MODULE 6 — DASHBOARD ENGINE [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Auto-generate dashboard blueprints based on available data and insights,
+  select appropriate chart types, and define layout rules.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                                 │ Description                      │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ dashboard_engine/blueprint           │ Auto-generate dashboard:         │
+  │   _generator.py                      │ • Analyze available features     │
+  │                                      │ • Create widget definitions      │
+  │                                      │ • Assign data bindings           │
+  │                                      │ • Output: DashboardBlueprint     │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ dashboard_engine/chart_selector.py   │ Smart chart type selection:      │
+  │                                      │ • Time-series → Line chart       │
+  │                                      │ • Categorical → Bar chart        │
+  │                                      │ • Distribution → Histogram       │
+  │                                      │ • Single value → Metric card     │
+  │                                      │ • Correlation → Scatter plot     │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ dashboard_engine/layout_rules.py     │ Layout composition:              │
+  │                                      │ • Grid placement (12-col grid)   │
+  │                                      │ • Priority-based ordering        │
+  │                                      │ • Section grouping               │
+  │                                      │ • Responsive breakpoints         │
+  └──────────────────────────────────────┴──────────────────────────────────┘
+
+  Integration:
+  • Reads insights from Module 5 + column profiles from Module 2
+  • Outputs blueprint JSON consumed by React DashboardCanvas
+  • Blueprint stored in dashboards table via dashboard_repo
+
+
+════════════════════════════════════════════════════════════════════════════════
+9. MODULE 7 — EXPORT LAYER [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Export insights, dashboards, and analytical reports as downloadable
+  files (Excel, PDF) for offline distribution.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                              │ Description                         │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ export/excel_exporter.py          │ Excel export:                       │
+  │                                   │ • Insights summary sheet            │
+  │                                   │ • Dashboard data sheet              │
+  │                                   │ • Raw data sheet                    │
+  │                                   │ • Conditional formatting            │
+  │                                   │ Uses: openpyxl                      │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ export/pdf_exporter.py            │ PDF export:                         │
+  │                                   │ • Report with charts as images      │
+  │                                   │ • Insight cards as formatted text   │
+  │                                   │ • Dashboard screenshots             │
+  │                                   │ Uses: reportlab or weasyprint       │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ export/snapshot.py                │ Dashboard snapshot:                  │
+  │                                   │ • Capture current dashboard state   │
+  │                                   │ • Include applied filters           │
+  │                                   │ • Embed interaction state           │
+  └───────────────────────────────────┴─────────────────────────────────────┘
+
+  Integration:
+  • Reads from insights and dashboards tables
+  • Writes export records to exports table via export_repo
+  • UI triggers export via Exports page → IPC → Python backend
+
+
+════════════════════════════════════════════════════════════════════════════════
+10. MODULE 8 — APP WIRING & FINAL [PENDING]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Wire together all modules through the IPC bridge, implement remaining
+  utility modules, finalize the Electron + PySide6 desktop shell, and
+  ensure end-to-end flow from file upload to dashboard display.
+
+Files to Implement:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ File                              │ Description                         │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ utils/validators.py               │ Generic validators:                 │
+  │                                   │ • File type validation              │
+  │                                   │ • Size limit checks                 │
+  │                                   │ • Path sanitization                 │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ utils/versioning.py               │ App versioning:                     │
+  │                                   │ • Semantic version tracking         │
+  │                                   │ • Migration support                 │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ frontend/electron_app/main/       │ Electron main process:              │
+  │                                   │ • Window creation                   │
+  │                                   │ • IPC bridge to Python              │
+  │                                   │ • File dialog integration           │
+  │                                   │ • Auto-updater (local)              │
+  ├───────────────────────────────────┼─────────────────────────────────────┤
+  │ IPC Integration                   │ Connect all 6 IPC handlers:         │
+  │                                   │ • ingestion_ipc (upload + ingest)   │
+  │                                   │ • runs_ipc (list + select runs)     │
+  │                                   │ • insights_ipc (fetch insights)     │
+  │                                   │ • dashboard_ipc (fetch blueprints)  │
+  │                                   │ • exports_ipc (trigger exports)     │
+  │                                   │ • data_health_ipc (health reports)  │
+  └───────────────────────────────────┴─────────────────────────────────────┘
+
+
+════════════════════════════════════════════════════════════════════════════════
+11. FRONTEND REDESIGN [COMPLETED]
+════════════════════════════════════════════════════════════════════════════════
+
+Purpose:
+  Transform the prototype frontend into a polished, desktop-quality UI
+  with consistent design system, interactive effects, and professional
+  visual quality.
+
+Changes Made:
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │ Area                    │ Changes                                       │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ Design System           │ Created styles/theme.ts with:                 │
+  │ (NEW FILE)              │ • Unified color palette (indigo primary)      │
+  │                         │ • Spacing, radius, shadow tokens              │
+  │                         │ • Typography (Inter font)                     │
+  │                         │ • Transition presets                          │
+  │                         │ • Reusable card/button styles                 │
+  │                         │ • Z-index layering system                     │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ App.css                 │ Replaced Vite boilerplate with:               │
+  │ (REWRITTEN)             │ • CSS custom properties (design tokens)       │
+  │                         │ • Global button hover/active effects          │
+  │                         │ • Input focus ring style                      │
+  │                         │ • Custom scrollbar styling                    │
+  │                         │ • Keyframe animations (fadeIn, slideUp,       │
+  │                         │   slideInLeft, pulse, shimmer)                │
+  │                         │ • .card-hover utility class                   │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ index.css               │ Enhanced with:                                │
+  │ (ENHANCED)              │ • Inter font import (Google Fonts)            │
+  │                         │ • Anti-aliased text rendering                 │
+  │                         │ • Tighter heading hierarchy                   │
+  │                         │ • ::selection styling                         │
+  │                         │ • Link hover transitions                     │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ App.tsx                 │ Fixed routing:                                │
+  │ (FIXED)                 │ • Switched from BrowserRouter to              │
+  │                         │   createHashRouter (Electron-compatible)      │
+  │                         │ • Uses AppLayout shell with Sidebar + TopBar  │
+  │                         │ • Proper RunGuard wrapping for protected      │
+  │                         │   routes                                      │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ Sidebar                 │ Complete rewrite:                             │
+  │ (REWRITTEN)             │ • react-icons/fi icons for every nav item     │
+  │                         │ • Active state with indigo left border +      │
+  │                         │   semi-transparent background                 │
+  │                         │ • Hover effects with translateX animation     │
+  │                         │ • Smooth collapse (64px ↔ 240px) with         │
+  │                         │   cubic-bezier spring transition              │
+  │                         │ • Toggle button with icon (Menu ↔ ChevronLeft)│
+  │                         │ • "Advanced" section divider                  │
+  │                         │ • Version badge at bottom                     │
+  │                         │ • Purple/navy gradient with glow border       │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ SearchBar               │ Desktop-quality rewrite:                      │
+  │ (REWRITTEN)             │ • FiSearch icon (left aligned)                │
+  │                         │ • Focus ring effect (indigo glow)             │
+  │                         │ • Background transition (gray → white)        │
+  │                         │ • Clear button (FiX) on non-empty input       │
+  │                         │ • Ctrl+K keyboard shortcut (optional)         │
+  │                         │ • Compact mode for modal usage                │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ AppLayout / TopBar      │ Polished header:                              │
+  │ (REWRITTEN)             │ • Three-stop gradient (deeper indigo)         │
+  │                         │ • Brand area with app name + subtitle tag     │
+  │                         │ • Active run indicator (green/gray dot with   │
+  │                         │   glow animation when active)                 │
+  │                         │ • Run ID in monospace font                    │
+  │                         │ • Glassmorphic "Select Run" button with       │
+  │                         │   backdrop-filter blur                        │
+  │                         │ • Content area: #f0f1f5 background (soft gray)│
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ Home Page               │ Complete redesign:                            │
+  │ (REWRITTEN)             │ • Summary cards with colored top accent       │
+  │                         │ • Action cards with icon badges that change   │
+  │                         │   color on hover (animated)                   │
+  │                         │ • Card lift effect (translateY -2px) on hover │
+  │                         │ • Keyboard accessible (tabIndex, Enter key)   │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ Ingestion Page          │ Styled with icon header                       │
+  │ Insights Page           │ Polished cards, colored metric borders        │
+  │ Dashboards Page         │ Consistent button styling throughout          │
+  │ Exports Page            │ Better dropdowns, status banners              │
+  │ Explorer Page           │ Pill-style column toggles, striped table      │
+  │ DataHealth Page         │ Green checkmarks, red-bordered error cards    │
+  ├─────────────────────────┼───────────────────────────────────────────────┤
+  │ FileUploadCard          │ Drag-and-drop zone, hover effects on         │
+  │                         │ source buttons, file display with icon        │
+  │ IngestionActions        │ FiPlay icon, styled primary button            │
+  │ IngestionStatusBanner   │ Animated slide-in, icons for success/error   │
+  │ RunGuard                │ Centered card with FiAlertTriangle icon       │
+  │ Metrics                 │ Colored accent stripes, uppercase labels      │
+  │ ChartWidget             │ Unified #6366f1 color, styled tooltips       │
+  │ DashboardSection        │ Card borders, subtle control-row bg           │
+  │ VisualizationSwitcher   │ Styled <select> with focus transition         │
+  │ ActiveRunBar            │ Monospace run ID in primary color             │
+  │ RunSelectorModal.css    │ Unified spinner/hover colors to #6366f1      │
+  └─────────────────────────┴───────────────────────────────────────────────┘
+
+Color Palette (Unified):
+  Primary:     #6366f1  (Indigo-500)  — buttons, active states, accents
+  Primary Dk:  #4f46e5  (Indigo-600)  — hover states
+  Primary Lt:  #818cf8  (Indigo-400)  — borders, highlights
+  Accent:      #8b5cf6  (Violet-500)  — secondary accents
+  Background:  #f0f1f5               — overall canvas
+  Card:        #ffffff               — card surfaces
+  Sidebar:     #111024 → #0f0d24    — deep navy gradient
+  Text:        #111827               — primary text
+  Text Muted:  #9ca3af               — secondary text
+  Border:      #e5e7eb               — standard borders
+  Success:     #10b981               — green indicators
+  Error:       #ef4444               — red alerts
+
+
+════════════════════════════════════════════════════════════════════════════════
+12. PROBLEM RESOLUTION (214 WARNINGS) [COMPLETED]
+════════════════════════════════════════════════════════════════════════════════
+
+Overview:
+  After the frontend redesign, 214 problems appeared in the VS Code Problems
+  panel. All were traced to the "Microsoft Edge Tools for VS Code" extension
+  (ms-edgedevtools.vscode-edge-devtools), which bundles webhint — a web best
+  practices linter.
+
+Problem Breakdown:
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ Category                                │ Count │ Resolution           │
+  ├─────────────────────────────────────────┼───────┼──────────────────────┤
+  │ "CSS inline styles should not be used"  │  ~210 │ Suppressed via       │
+  │  (webhint: no-inline-styles)            │       │ .hintrc config       │
+  ├─────────────────────────────────────────┼───────┼──────────────────────┤
+  │ "Buttons must have discernible text"    │    4  │ Added title +        │
+  │  (a11y: icon-only buttons)              │       │ aria-label attrs     │
+  ├─────────────────────────────────────────┼───────┼──────────────────────┤
+  │ "Select element must have accessible    │    5  │ Added id/htmlFor     │
+  │  name" (a11y: unlabeled selects)        │       │ + title attrs        │
+  └─────────────────────────────────────────┴───────┴──────────────────────┘
+
+Root Cause Analysis:
+  1. Inline CSS warnings — The Edge DevTools extension's webhint linter
+     flags React's style={} prop as "inline styles." This is a false positive
+     for React applications, where inline styles via JavaScript objects are
+     a standard pattern. Suppressed by creating .hintrc with the
+     "no-inline-styles": "off" setting.
+
+  2. Accessibility warnings — Genuine issues where interactive elements
+     lacked proper accessible names for screen readers.
+
+Files Modified (Accessibility Fixes):
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ File                           │ Fix Applied                           │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ Dashboards.tsx                 │ Added title="Undo"/aria-label="Undo" │
+  │                                │ and title="Redo"/aria-label="Redo"   │
+  │                                │ to icon-only Undo/Redo buttons       │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ Exports.tsx                    │ Added id/htmlFor associations and     │
+  │                                │ title attrs to both <select> elements │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ DashboardToolBar.tsx           │ Added title/aria-label to icon-only   │
+  │                                │ Undo and Redo buttons                 │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ VisualizationSwitcher.tsx      │ Added aria-label/title to chart type  │
+  │                                │ switcher <select>                     │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ TimeSlicer.tsx                 │ Added htmlFor/id link between label   │
+  │                                │ and select; added title attr          │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ SessionFilterBar.tsx           │ Changed <strong> to proper <label>    │
+  │                                │ with htmlFor/id association           │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ DimensionSlicer.tsx            │ Added htmlFor/id link + title to      │
+  │                                │ dynamic dimension <select> elements   │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ Explorer.tsx                   │ Added aria-label to search input      │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ RunSelector.tsx                │ Added aria-label to search input      │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ SearchBar.tsx                  │ Added aria-label={placeholder} to     │
+  │                                │ the reusable search input component   │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ FileUploadCard.tsx             │ Added aria-label to hidden file input │
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ Sidebar.tsx                    │ Added title/aria-label={label} to all │
+  │                                │ NavLink items (visible when collapsed)│
+  ├────────────────────────────────┼───────────────────────────────────────┤
+  │ RunSelectorModal.tsx           │ Added aria-label="Close"/title="Close"│
+  │                                │ to the × close button                 │
+  └────────────────────────────────┴───────────────────────────────────────┘
+
+New Configuration Files:
+  • .hintrc (workspace root) — Disables webhint no-inline-styles hint
+  • .hintrc (renderer root)  — Same for renderer-level analysis
+
+Final Result:
+  • VS Code Problems panel: 0 problems
+  • TypeScript compilation: 0 errors
+  • Vite production build: SUCCESS (711 modules, dist/ generated)
+
+
+════════════════════════════════════════════════════════════════════════════════
+13. DATABASE SCHEMA
+════════════════════════════════════════════════════════════════════════════════
+
+File: storage/schema.sql
+
+  Table: runs
+  ├── run_id          TEXT PRIMARY KEY
+  ├── created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  ├── status          TEXT DEFAULT 'PROCESSING'
+  ├── source_type     TEXT
+  └── metadata        TEXT (JSON)
+
+  Table: ingested_files
+  ├── file_id         TEXT PRIMARY KEY
+  ├── run_id          TEXT → FK(runs)
+  ├── file_name       TEXT
+  ├── file_path       TEXT
+  ├── schema_hash     TEXT
+  ├── row_count       INTEGER
+  ├── columns         TEXT (JSON array)
+  ├── source_type     TEXT
+  └── ingested_at     TIMESTAMP
+
+  Table: feature_store
+  ├── feature_id      TEXT PRIMARY KEY
+  ├── run_id          TEXT → FK(runs)
+  ├── feature_name    TEXT
+  ├── feature_value   DOUBLE
+  ├── entity_id       TEXT
+  ├── timestamp       TIMESTAMP
+  └── source          TEXT
+
+  Table: profiling_results
+  ├── profile_id      TEXT PRIMARY KEY
+  ├── run_id          TEXT → FK(runs)
+  ├── column_name     TEXT
+  ├── data_type       TEXT
+  ├── stats           TEXT (JSON)
+  └── created_at      TIMESTAMP
+
+  Table: insights
+  ├── insight_id      TEXT PRIMARY KEY
+  ├── run_id          TEXT → FK(runs)
+  ├── type            TEXT
+  ├── severity        TEXT
+  ├── title           TEXT
+  ├── description     TEXT
+  ├── data            TEXT (JSON)
+  └── created_at      TIMESTAMP
+
+  Table: dashboards
+  ├── dashboard_id    TEXT PRIMARY KEY
+  ├── run_id          TEXT → FK(runs)
+  ├── title           TEXT
+  ├── blueprint       TEXT (JSON)
+  └── created_at      TIMESTAMP
+
+  Table: exports
+  ├── export_id       TEXT PRIMARY KEY
+  ├── run_id          TEXT → FK(runs)
+  ├── format          TEXT
+  ├── scope           TEXT
+  ├── file_path       TEXT
+  └── exported_at     TIMESTAMP
+
+
+════════════════════════════════════════════════════════════════════════════════
+14. FILE STRUCTURE REFERENCE
+════════════════════════════════════════════════════════════════════════════════
+
+industrial-data-ingestion/
+├── app/
+│   ├── main.py                          # CLI entry point
+│   └── pipeline_runner.py               # Full pipeline orchestrator
+├── data/
+│   └── sample/
+│       ├── plc_sample.csv               # Test PLC data (10 rows)
+│       └── sap_orders.csv               # Test SAP data (5 rows)
+├── dashboard_engine/
+│   ├── blueprint_generator.py           # [EMPTY — Module 6]
+│   ├── chart_selector.py                # [EMPTY — Module 6]
+│   └── layout_rules.py                  # [EMPTY — Module 6]
+├── docs/
+│   └── FRONTEND Architecture Layer.txt
+├── feature_store/
+│   ├── pipeline.py                      # Feature extraction pipeline
+│   ├── builders/                        # Feature builders per source
+│   │   ├── base_builder.py
+│   │   ├── plc_features.py
+│   │   ├── rfid_features.py
+│   │   ├── sap_features.py
+│   │   └── excel_features.py
+│   ├── configs/
+│   │   ├── feature_catalog.yaml
+│   │   ├── normalization.yaml
+│   │   └── time_alignment.yaml
+│   ├── processors/
+│   │   ├── cleaner.py
+│   │   ├── normalizer.py
+│   │   └── time_aligner.py
+│   ├── registry/
+│   │   ├── feature_registry.yaml
+│   │   └── registry_manager.py
+│   └── validators/
+│       ├── range_validator.py
+│       └── schema_validator.py
+├── frontend/
+│   └── electron_app/
+│       └── renderer/
+│           └── src/
+│               ├── App.tsx              # Root component (hash router)
+│               ├── App.css              # Design tokens + animations
+│               ├── index.css            # Base reset + typography
+│               ├── main.tsx             # React entry point
+│               ├── app/
+│               │   ├── AppLayout.tsx    # Shell: topbar + sidebar + outlet
+│               │   ├── Router.tsx       # Hash router definition
+│               │   └── Layout.tsx       # Legacy layout (unused)
+│               ├── styles/
+│               │   └── theme.ts         # Design system tokens
+│               ├── pages/
+│               │   ├── Home/
+│               │   ├── Ingestion/
+│               │   ├── Insights/
+│               │   ├── Dashboards/
+│               │   ├── Exports/
+│               │   ├── Explorer/
+│               │   └── DataHealth/
+│               ├── components/
+│               │   ├── Sidebar/         # Nav with icons + effects
+│               │   ├── SearchBar/       # Desktop-quality search
+│               │   ├── TopBar/
+│               │   ├── ingestion/       # FileUploadCard, Actions, Banner
+│               │   ├── RunSelector/     # Modal with animations
+│               │   ├── RunGuard/        # Protected route guard
+│               │   ├── RunBar/          # Active run indicator
+│               │   ├── Dashboard/       # Canvas, Header, Section, Toolbar
+│               │   ├── Widgets/         # Chart, Metric, Text, Map, Image
+│               │   ├── Filters/         # Global, Session, Widget, Slicers
+│               │   ├── Drill/           # DrillContext, DrillHandler
+│               │   └── Metrics/         # Metric cards grid
+│               ├── state/               # Zustand-like external stores
+│               │   ├── run_ui_store.ts
+│               │   ├── ingestion_ui_store.ts
+│               │   ├── insights_ui_store.ts
+│               │   ├── dashboards_ui_store.ts
+│               │   ├── exports_ui_store.ts
+│               │   ├── state_reset.ts
+│               │   └── hooks (useRunUI, useDashboardsUI)
+│               ├── services/
+│               │   ├── frontendApi.ts    # IPC bridge abstraction
+│               │   └── ingestion.service.ts
+│               └── contracts/           # TypeScript type contracts
+├── ingestion/
+│   ├── base_ingestor.py                 # Base class with schema hashing
+│   ├── ingestion_manager.py             # Multi-source manager
+│   ├── upload_handler.py                # File upload + auto-detection
+│   ├── contracts/                       # 7 JSON validation schemas
+│   ├── readers/                         # CSV, Excel, JSON, Log readers
+│   ├── sources/                         # 5 source ingestors
+│   ├── validators/                      # Schema, type, time validators
+│   └── versioning/                      # Run ID + Parquet versioning
+├── ipc/                                 # 6 IPC handler modules
+├── ml_engine/                           # [ALL EMPTY — Module 4]
+├── orchestration/                       # [ALL EMPTY — Module 5]
+├── profiling/                           # [ALL EMPTY — Module 2]
+├── rule_engine/                         # [ALL EMPTY — Module 3]
+├── storage/
+│   ├── connection.py                    # DuckDB singleton
+│   ├── schema.sql                       # 7-table schema
+│   └── repositories/                    # 6 repository modules
+├── tests/
+│   ├── test_features.py
+│   ├── test_ingestion.py
+│   └── test_normalization.py
+├── utils/
+│   ├── config_loader.py
+│   ├── logger.py
+│   ├── validators.py                    # [EMPTY — Module 8]
+│   └── versioning.py                    # [EMPTY — Module 8]
+├── requirements.txt
+├── README.md
+└── Total_work.txt                       # This file
+
+
+════════════════════════════════════════════════════════════════════════════════
+END OF DOCUMENTATION
+════════════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
+import hashlib
 import pandas as pd
 
 from .versioning.run_id import generate_run_id
@@ -117,6 +118,17 @@ class BaseIngestor(ABC):
     # Metadata
     # ------------------------------------------------------------------
 
+    def _generate_schema_hash(self, data: pd.DataFrame) -> str:
+        """
+        Generate a deterministic hash of the column structure
+        (names + dtypes) for schema change detection.
+        """
+        schema_signature = "|".join(
+            f"{col}:{dtype}" for col, dtype in
+            sorted(zip(data.columns, data.dtypes.astype(str)))
+        )
+        return hashlib.sha256(schema_signature.encode("utf-8")).hexdigest()[:16]
+
     def _build_metadata(self, path: Path, data: pd.DataFrame) -> dict:
         """
         Metadata returned to orchestration layer.
@@ -124,8 +136,10 @@ class BaseIngestor(ABC):
         return {
             "source": self.source_name,
             "run_id": self.run_id,
+            "file_name": self.source_path.name,
             "rows": len(data),
             "columns": list(data.columns),
+            "schema_hash": self._generate_schema_hash(data),
             "output_path": str(path),
             "ingested_at": self.ingestion_time.isoformat(),
         }

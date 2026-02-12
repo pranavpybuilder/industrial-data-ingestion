@@ -37,8 +37,10 @@ const DimensionSlicer = ({
 
   return (
     <div style={{ marginBottom: "0.5rem" }}>
-      <label>{label}:</label>
+      <label htmlFor={`dim-${slicerId}`}>{label}:</label>
       <select
+        id={`dim-${slicerId}`}
+        title={label}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
