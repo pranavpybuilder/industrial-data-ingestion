@@ -2,6 +2,9 @@
 
 from typing import List, Dict, Optional
 from storage.connection import get_connection
+from datetime import datetime
+from storage.connection import get_connection
+
 
 
 class IngestionRepository:
@@ -91,4 +94,38 @@ class IngestionRepository:
         conn.execute(
             "DELETE FROM ingested_files WHERE run_id = ?",
             (run_id,),
+        )
+
+    def create_run(
+        self,
+        run_id: str,
+        run_name: str,
+        source_type: str,
+        status: str = "CREATED",
+    ) -> None:
+        conn = get_connection()
+
+        conn.execute(
+            """
+            INSERT INTO runs (
+                run_id,
+                run_name,
+                source_type,
+                status
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                run_name,
+                source_type,
+                status,
+            ),
+        )
+
+    def update_run_status(self, run_id: str, status: str) -> None:
+        conn = get_connection()
+        conn.execute(
+            "UPDATE runs SET status = ? WHERE run_id = ?",
+            (status, run_id),
         )

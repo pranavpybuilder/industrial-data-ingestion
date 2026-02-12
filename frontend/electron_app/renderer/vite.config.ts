@@ -4,7 +4,11 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
-
+  base: "./",        // 🔴 THIS IS THE KEY FIX
+  build: {
+  outDir: "dist",
+  emptyOutDir: true,
+   },
   resolve: {
     alias: {
       pages: path.resolve(__dirname, "src/pages"),

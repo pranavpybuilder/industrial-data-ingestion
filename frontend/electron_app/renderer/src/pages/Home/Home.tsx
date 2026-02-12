@@ -33,7 +33,26 @@ const Home = () => {
           title="Active Run"
           value={run.activeRunId ?? "No run selected"}
           description="Currently selected ingestion run"
-        />
+        >
+          {!run.activeRunId && (
+            <button
+              onClick={() => navigate("/ingestion")}
+              style={{
+                marginTop: "10px",
+                padding: "8px",
+                width: "100%",
+                borderRadius: "8px",
+                border: "none",
+                background: "#2563eb",
+                color: "#ffffff",
+                fontSize: "13px",
+                cursor: "pointer",
+              }}
+            >
+              Start New Ingestion
+            </button>
+          )}
+        </SummaryCard>
 
         {/* Total Insights & Dashboards */}
         <SummaryCard
@@ -104,17 +123,20 @@ interface SummaryCardProps {
   title: string;
   value: string;
   description: string;
+  children?: React.ReactNode;
 }
 
 const SummaryCard = ({
   title,
   value,
   description,
+  children,
 }: SummaryCardProps) => (
   <div style={summaryCard}>
     <div style={summaryTitle}>{title}</div>
     <div style={summaryValue}>{value}</div>
     <div style={summaryDesc}>{description}</div>
+    {children}
   </div>
 );
 
@@ -129,11 +151,7 @@ const ActionCard = ({
   description,
   onClick,
 }: ActionCardProps) => (
-  <div
-    style={actionCard}
-    onClick={onClick}
-    role="button"
-  >
+  <div style={actionCard} onClick={onClick} role="button">
     <h3 style={{ marginBottom: "6px" }}>{title}</h3>
     <p style={{ fontSize: "13px", color: "#6b7280" }}>
       {description}
@@ -173,7 +191,6 @@ const actionCard: React.CSSProperties = {
   padding: "18px",
   boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
   cursor: "pointer",
-  transition: "transform 0.15s ease, box-shadow 0.15s ease",
 };
 
 export default Home;

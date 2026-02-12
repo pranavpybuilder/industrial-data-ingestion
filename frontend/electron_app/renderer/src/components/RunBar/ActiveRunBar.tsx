@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { runUI } from "../../state/run_ui_store";
-import { RunSelectorModal } from "../RunSelector/RunSelectorModal";
+import  RunSelectorModal  from "../RunSelector/RunSelectorModal";
 
 const ActiveRunBar = () => {
   const runState = useSyncExternalStore(

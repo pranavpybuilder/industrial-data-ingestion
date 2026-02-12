@@ -172,7 +172,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "14px",
     borderRadius: "6px",
     border: "1px solid #d1d5db",
-    width: "240px",
   },
 
   columnBox: {
@@ -180,6 +179,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px",
     borderRadius: "6px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    alignContent: "center",
   },
 
   columnLabel: {

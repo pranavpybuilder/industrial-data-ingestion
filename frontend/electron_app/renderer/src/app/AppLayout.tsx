@@ -3,7 +3,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "../components/Sidebar/Sidebar";
 import Logo from "../assets/logo.svg";
 import { runUI } from "../state/run_ui_store";
-import { RunSelectorModal } from "../components/RunSelector/RunSelectorModal";
+import  RunSelectorModal from "../components/RunSelector/RunSelectorModal";
 
 const AppLayout = () => {
   const [collapsed, setCollapsed] = useState(false);

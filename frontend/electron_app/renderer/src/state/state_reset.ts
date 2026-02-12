@@ -8,11 +8,10 @@ import { dashboardsUI } from "./dashboards_ui_store";
  * This is the ONLY place where cross-state side effects are allowed.
  */
 export function onRunChange(runId: string) {
-  // ---------- CLEAR RUN ----------
-  if (!runId) {
+  if (!runId || runId.trim() === "") {
     runUI.clearRun();
-    dashboardsUI.reset();
-    return;
+  } else {
+    runUI.setActiveRun(runId);
   }
 
   // ---------- SET ACTIVE RUN ----------
@@ -48,4 +47,5 @@ export function onRunChange(runId: string) {
     },
     1
   );
+  console.log(`[State Reset] Run changed to: ${runId || "none"}`);
 }

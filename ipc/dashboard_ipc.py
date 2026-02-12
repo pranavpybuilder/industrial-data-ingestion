@@ -1,5 +1,3 @@
-# ipc/dashboard_ipc.py
-
 from storage.repositories.dashboard_repo import DashboardRepository
 
 dashboard_repo = DashboardRepository()
@@ -11,7 +9,7 @@ def get_dashboard_for_run_ipc(run_id: str):
     if dashboard is None:
         return {
             "success": True,
-            "data": None,  # frontend shows empty state
+            "data": None,
         }
 
     return {

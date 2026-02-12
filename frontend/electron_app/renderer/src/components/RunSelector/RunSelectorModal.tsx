@@ -1,123 +1,120 @@
-import React from "react";
-import { onRunChange } from "../../state/state_reset";
+import { useEffect, useState } from "react";
+import SearchBar from "../SearchBar/SearchBar";
+import { runUI } from "../../state/run_ui_store";
+import { frontendApi } from "../../services/frontendApi";
+import "./RunSelectorModal.css";
+
+interface RunMeta {
+  run_id: string;
+}
 
 interface Props {
   onClose: () => void;
 }
 
-/**
- * RunSelectorModal
- *
- * Purpose:
- * - Allows user to select an already ingested dataset (run)
- * - Delegates ALL state changes to the central orchestration layer
- *
- * IMPORTANT:
- * - This component NEVER talks directly to runUI or dashboardsUI
- * - All side effects go through `onRunChange`
- */
-export function RunSelectorModal({ onClose }: Props) {
-  /**
-   * UI-only placeholder list.
-   * Later this will come from backend / IPC.
-   */
-  const ingestedFiles = [
-    "sap_pm_iw29_2024_01_12.xlsx",
-    "rfid_log_shiftA_2024_01_13.csv",
-    "plc_snapshot_line2_2024_01_14.json",
-    "test_log.csv",
-  ];
+const RunSelectorModal = ({ onClose }: Props) => {
+  const [runs, setRuns] = useState<RunMeta[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const fetchRuns = async () => {
+    setLoading(true);
+    try {
+      const result = await frontendApi.getRuns();
+      setRuns(result || []);
+    } catch (err) {
+      console.error("Failed to fetch runs", err);
+      setRuns([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRuns();
+  }, []);
+
+  const filteredRuns = runs.filter((run) => {
+    if (!search.trim()) return true;
+    const searchLower = search.toLowerCase().trim();
+    const runIdLower = run.run_id.toLowerCase();
+    return runIdLower.includes(searchLower);
+  });
+
+  const handleSelectRun = (runId: string) => {
+    runUI.setActiveRun(runId);
+    onClose();
+  };
 
   return (
-    <div style={overlay}>
-      <div style={modal}>
-        <h3>Select Ingested File</h3>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Select Ingested File</h2>
+          <button className="close-btn" onClick={onClose}>
+            ×
+          </button>
+        </div>
 
-        {ingestedFiles.length === 0 ? (
-          <p style={muted}>
-            No ingested files available yet.
-            <br />
-            Please ingest data to continue.
-          </p>
-        ) : (
-          <ul style={list}>
-            {ingestedFiles.map((fileName) => (
-              <li key={fileName}>
-                <button
-                  style={fileButton}
-                  onClick={() => {
-                    /**
-                     * CENTRALIZED STATE CHANGE
-                     * ------------------------
-                     * This will:
-                     * 1. Set active run
-                     * 2. Reset dashboard state
-                     * 3. Initialize dashboard for this run
-                     */
-                    onRunChange(fileName);
-                    onClose();
-                  }}
+        <div className="modal-body">
+          <div className="search-wrapper">
+            <SearchBar
+              value={search}
+              placeholder="Search run / file..."
+              onChange={setSearch}
+            />
+          </div>
+
+          <div className="runs-list-container">
+            {loading && (
+              <div className="state-message">
+                <div className="spinner"></div>
+                <p>Loading runs...</p>
+              </div>
+            )}
+
+            {!loading && filteredRuns.length === 0 && (
+              <div className="state-message empty">
+                <p className="empty-text">
+                  {search
+                    ? `No runs found matching "${search}"`
+                    : "No runs available"}
+                </p>
+                {search && (
+                  <button
+                    className="clear-search-btn"
+                    onClick={() => setSearch("")}
+                  >
+                    Clear search
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!loading &&
+              filteredRuns.map((run) => (
+                <div
+                  key={run.run_id}
+                  className="run-item"
+                  onClick={() => handleSelectRun(run.run_id)}
                 >
-                  {fileName}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <div className="run-details">
+                    <span className="run-id">{run.run_id}</span>
+                  </div>
+                  <div className="run-arrow">→</div>
+                </div>
+              ))}
+          </div>
+        </div>
 
-        <button onClick={onClose} style={closeButton}>
-          Cancel
-        </button>
+        <div className="modal-footer">
+          <button className="cancel-btn" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
-}
-
-/* -------------------- Styles -------------------- */
-
-const overlay: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.4)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
 };
 
-const modal: React.CSSProperties = {
-  background: "#ffffff",
-  padding: 24,
-  borderRadius: 8,
-  width: 420,
-};
-
-const muted: React.CSSProperties = {
-  color: "#6b7280",
-  fontSize: 14,
-  lineHeight: 1.5,
-};
-
-const list: React.CSSProperties = {
-  listStyle: "none",
-  padding: 0,
-  marginTop: 16,
-  marginBottom: 16,
-};
-
-const fileButton: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  textAlign: "left",
-  borderRadius: 6,
-  border: "1px solid #e5e7eb",
-  background: "#f9fafb",
-  cursor: "pointer",
-  marginBottom: 8,
-  fontSize: 14,
-  fontFamily: "monospace",
-};
-
-const closeButton: React.CSSProperties = {
-  marginTop: 8,
-};
+export default RunSelectorModal;

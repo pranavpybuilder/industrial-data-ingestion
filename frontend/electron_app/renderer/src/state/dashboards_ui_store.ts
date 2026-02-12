@@ -11,23 +11,45 @@
 
 export type FilterMap = Record<string, any>;
 
+/* =====================================================
+   Interaction State (SINGLE SOURCE OF TRUTH)
+   ===================================================== */
+
 export interface InteractionState {
+  /* 🔹 Time slicing */
+  timeGranularity: "day" | "month" | "year";
+
+  /* 🔹 Global filters (e.g., equipment, line, shift) */
   globalFilters: FilterMap;
+
+  /* 🔹 Widget-level filters */
   widgetFilters: {
     [widgetId: string]: FilterMap;
   };
+
+  /* 🔹 Session-only filters */
   sessionFilters: {
     global?: FilterMap;
     widget?: {
       [widgetId: string]: FilterMap;
     };
   };
+
+  /* 🔹 Drill-down context */
   drillContext: FilterMap | null;
+
+  /* 🔹 Visualization overrides */
   visualTypes: {
     [widgetId: string]: string;
   };
+
+  /* 🔹 Hidden widgets */
   hiddenWidgets: Set<string>;
 }
+
+/* =====================================================
+   Dashboard Blueprint
+   ===================================================== */
 
 export interface DashboardBlueprint {
   dashboardId: string;
@@ -39,6 +61,10 @@ export interface DashboardBlueprint {
   }>;
 }
 
+/* =====================================================
+   Store State
+   ===================================================== */
+
 export interface DashboardsUIState {
   isLoaded: boolean;
   dashboardCount: number;
@@ -49,6 +75,10 @@ export interface DashboardsUIState {
 }
 
 type Listener = () => void;
+
+/* =====================================================
+   Store Implementation
+   ===================================================== */
 
 class DashboardsUIStore {
   private listeners = new Set<Listener>();
@@ -102,6 +132,7 @@ class DashboardsUIStore {
       dashboardCount,
       blueprint,
       interactionState: {
+        timeGranularity: "day", // ✅ FIXED
         globalFilters: {},
         widgetFilters: {},
         sessionFilters: {},
@@ -194,7 +225,9 @@ class DashboardsUIStore {
   }
 }
 
-/* ---------- Public API ---------- */
+/* =====================================================
+   Public API
+   ===================================================== */
 
 const store = new DashboardsUIStore();
 
