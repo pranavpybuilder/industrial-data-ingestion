@@ -45,7 +45,7 @@ class FrontendMainWindow(QMainWindow):
         self.web_view.page().setWebChannel(self.channel)
 
         # -------------------------------------------------
-        # Inject bridge BEFORE React loads
+        # Inject qwebchannel.js and bridge BEFORE React loads
         # -------------------------------------------------
         script = QWebEngineScript()
         script.setName("qt_bridge")
@@ -53,21 +53,35 @@ class FrontendMainWindow(QMainWindow):
         script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
         script.setRunsOnSubFrames(False)
 
-        script.setSourceCode(
-            """
-            (function() {
-                document.addEventListener("DOMContentLoaded", function() {
-                    if (typeof qt !== "undefined") {
-                        new QWebChannel(qt.webChannelTransport, function(channel) {
-                            window.frontendAPI = channel.objects.frontendAPI;
-                            console.log("Qt bridge ready (offline mode).");
-                        });
-                    }
-                });
-            })();
-            """
-        )
+        # Load qwebchannel.js from PySide6 resources
+        try:
+            from PySide6.QtCore import QFile, QIODevice
+            qwc_file = QFile(":/qtwebchannel/qwebchannel.js")
+            if qwc_file.open(QIODevice.ReadOnly):
+                qwc_code = bytes(qwc_file.readAll()).decode("utf-8")
+                qwc_file.close()
+            else:
+                # Fallback: minimal QWebChannel init
+                qwc_code = ""
+        except Exception:
+            qwc_code = ""
 
+        bridge_code = f"""
+        {qwc_code}
+        (function() {{
+            if (typeof qt !== "undefined" && typeof QWebChannel !== "undefined") {{
+                new QWebChannel(qt.webChannelTransport, function(channel) {{
+                    window.frontendAPI = channel.objects.frontendAPI;
+                    console.log("✓ Qt bridge ready (offline mode).");
+                    window.dispatchEvent(new Event("qt-ready"));
+                }});
+            }} else {{
+                console.warn("⚠ Qt bridge unavailable - running in reduced mode");
+            }}
+        }})();
+        """
+
+        script.setSourceCode(bridge_code)
         self.web_view.page().scripts().insert(script)
 
         # -------------------------------------------------

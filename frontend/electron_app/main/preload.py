@@ -1,6 +1,7 @@
 from PySide6.QtCore import QObject, Slot
 
 from ipc.runs_ipc import list_runs, search_runs_ipc
+from ipc.ingestion_ipc import upload_file_ipc, get_ingestion_status_ipc
 from ipc.insights_ipc import get_insights_ipc
 from ipc.dashboard_ipc import get_dashboard_for_run_ipc
 from ipc.data_health_ipc import get_data_health_ipc
@@ -12,6 +13,20 @@ class FrontendAPI(QObject):
     Qt-exposed frontend API.
     Thin, read-only bridge between UI and backend IPC.
     """
+
+    # -----------------------------
+    # Ingestion APIs
+    # -----------------------------
+    @Slot(str, str, result=dict)
+    def upload_file(self, file_path: str, source_type: str = ""):
+        return upload_file_ipc(
+            file_path=file_path,
+            source_type=source_type if source_type else None,
+        )
+
+    @Slot(str, result=dict)
+    def get_ingestion_status(self, run_id: str):
+        return get_ingestion_status_ipc(run_id)
 
     # -----------------------------
     # Run APIs

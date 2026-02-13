@@ -29,11 +29,13 @@ node_modules/
 ~$*.docx
 ~WRL*.tmp
 
+
 # ===============================
 # Testing / Database
 # ===============================
 test*.py
 *.duckdb
+
 
 # ===============================
 # Runtime Data & Logs
