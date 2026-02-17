@@ -9,7 +9,7 @@ from datetime import datetime
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-_INITIALIZED = False
+_INITIALIZED_LOGGERS = set()
 
 
 def get_logger(name: str = "industrial") -> logging.Logger:
@@ -18,13 +18,14 @@ def get_logger(name: str = "industrial") -> logging.Logger:
 
     - Console output (INFO+)
     - File output (DEBUG+) to logs/app_YYYYMMDD.log
-    - Single initialization per process
+    - Single initialization per logger name
     """
-    global _INITIALIZED
+    global _INITIALIZED_LOGGERS
 
     logger = logging.getLogger(name)
 
-    if _INITIALIZED:
+    # Skip if this logger was already initialized
+    if name in _INITIALIZED_LOGGERS:
         return logger
 
     logger.setLevel(logging.DEBUG)
@@ -50,5 +51,5 @@ def get_logger(name: str = "industrial") -> logging.Logger:
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    _INITIALIZED = True
+    _INITIALIZED_LOGGERS.add(name)
     return logger

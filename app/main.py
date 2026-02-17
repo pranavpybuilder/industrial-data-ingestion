@@ -76,6 +76,9 @@ def main() -> None:
         logger.info(f"  Rows        : {result['rows']}")
         logger.info(f"  Schema Hash : {result['schema_hash']}")
         logger.info(f"  Features    : {result['feature_count']}")
+        health_score = result.get('health_score', None)
+        if health_score is not None:
+            logger.info(f"  Health Score: {health_score:.1f}/100")
         logger.info(f"  Output      : {result['output_path']}")
         logger.info("─" * 40)
     else:

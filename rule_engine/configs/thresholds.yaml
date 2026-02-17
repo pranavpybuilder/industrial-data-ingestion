@@ -1,0 +1,177 @@
+# rule_engine/configs/thresholds.yaml
+
+"""
+System-wide thresholds for Rule Engine.
+
+These thresholds define when rules should trigger for different data conditions.
+Override with source-specific or machine-specific values as needed.
+"""
+
+# Global thresholds - applied to all data sources unless overridden
+global_thresholds:
+  
+  # Data quality thresholds
+  completeness:
+    warning: 80          # % non-null values (below triggers warning)
+    critical: 50         # % non-null values (below triggers critical)
+  
+  consistency:
+    warning: 85          # % consistent with schema (column type matches)
+    critical: 70
+  
+  uniqueness:
+    warning: 75          # % unique values (for identifier columns)
+    critical: 50
+  
+  validity:
+    warning: 85          # % valid values (pass range/format checks)
+    critical: 70
+  
+  freshness:
+    warning: 48          # % recent data (within 48 hours)
+    critical: 24         # % recent data (within 24 hours)
+  
+  outlier_count:
+    warning: 5_percent   # trigger warning if > 5% outliers detected
+    critical: 10_percent # trigger critical if > 10% outliers
+
+
+# PLC (Machine Telemetry) thresholds
+plc:
+  
+  temperature:
+    metric: numeric
+    min: 0
+    max: 90              # Warning threshold
+    critical_max: 100    # Critical threshold
+    unit: celsius
+    description: "Machine operating temperature"
+  
+  pressure:
+    metric: numeric
+    min: 0
+    max: 10              # Machine-dependent, override per machine_id
+    critical_max: 15
+    unit: bar
+    description: "Hydraulic/pneumatic pressure"
+  
+  vibration:
+    metric: numeric
+    min: 0
+    max: 5               # Normal operating range
+    warning: 3           # Threshold for bearing wear alert
+    critical: 7          # Critical vibration level
+    unit: mm/s
+    description: "Bearing vibration sensor reading"
+  
+  downtime_duration_minutes:
+    metric: numeric
+    warning_min: 60      # Unexpected >> 1 hour downtime
+    critical_min: 240    # > 4 hours is critical
+    description: "Machine downtime duration"
+
+
+# SAP PM Orders
+sap:
+  
+  pm_overdue_days:
+    warning: 30          # PM order overdue by > 30 days = warning
+    critical: 60         # PM order overdue by > 60 days = critical
+    description: "Maintenance order aging"
+  
+  breakdown_interval_days:
+    warning: 30          # Breakdowns within 30 days of each other = pattern
+    critical: 14         # Breakdowns < 14 days apart = critical pattern
+    description: "Failure recurrence window"
+  
+  repeated_failures:
+    warning: 3           # Same component/code 3+ times in N days
+    critical: 5          # Same component/code 5+ times in N days
+    lookback_days: 90
+    description: "Repeated failure detection"
+
+
+# RFID scan data
+rfid:
+  
+  scan_gap_hours:
+    warning: 24          # No scans for 24 hours
+    critical: 72         # No scans for 72 hours
+    description: "RFID scanner connectivity gap"
+  
+  duplicate_scan_window_seconds:
+    threshold: 5         # Scans < 5 seconds apart = duplicate
+    description: "Duplicate tag scan detection"
+
+
+# Excel operational reports
+excel:
+  
+  energy_consumption_efficiency:
+    warning: 0.15        # 15% above baseline
+    critical: 0.25       # 25% above baseline
+    unit: percent_increase
+    description: "Energy consumption anomaly"
+  
+  production_efficiency:
+    warning: 20          # Below 80% efficiency
+    critical: 35         # Below 65% efficiency
+    unit: percent
+    description: "Production line efficiency"
+
+
+# Health dimension weights (for combined health score)
+health_dimension_weights:
+  completeness: 0.25
+  consistency: 0.25
+  uniqueness: 0.15
+  validity: 0.20
+  freshness: 0.15
+
+
+# Outlier detection configuration
+outlier_detection:
+  method: iqr            # Interquartile range method
+  iqr_multiplier: 1.5    # Standard 1.5 * IQR for mild outliers
+  min_samples: 4         # Need at least 4 samples to detect outliers
+  z_score_threshold: 3.0 # Z-score > 3 = outlier (for comparison)
+
+
+# Temporal analysis configuration
+temporal_analysis:
+  min_data_points: 5          # Need 5+ points for trend analysis
+  trend_window_hours: 24      # Look back 24 hours for trends
+  seasonal_multiplier: 1.2    # 20% above baseline = anomalous
+  
+  
+# Maintenance rules configuration
+maintenance_rules:
+  
+  # PM scheduling
+  pm_scheduling:
+    alert_before_due_days: 14  # Warn 2 weeks before PM due
+    overdue_after_days: 0      # Immediately flag overdue
+    critical_after_days: 60    # Critical if 2 months overdue
+  
+  # Failure pattern detection
+  failure_patterns:
+    min_failures_for_pattern: 3  # Need 3+ failures to define pattern
+    pattern_window_days: 90      # Look back 90 days
+    
+  # Degradation trends
+  degradation_detection:
+    trend_threshold: 0.05      # 5% degradation = warning
+    critical_threshold: 0.15   # 15% degradation = critical
+    
+  # Energy efficiency
+  energy_analysis:
+    baseline_window_days: 30   # Use last 30 days as baseline
+    seasonal_factor: 0.1       # Allow 10% seasonal variation
+
+
+# Rule confidence adjustments
+confidence_factors:
+  data_completeness: 0.05      # -5 confidence per missing %
+  outlier_presence: 0.02       # -2 confidence per outlier %
+  recent_data_weight: 0.1      # Increase confidence if data is recent
+  multiple_indicators: 0.15    # Increase confidence if multiple rules triggered
