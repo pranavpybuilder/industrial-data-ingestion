@@ -1,0 +1,247 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║            OFFLINE INDUSTRIAL DATA INTELLIGENCE SYSTEM                       ║
+║                     DEPLOYMENT GUIDE v1.0                                    ║
+║                                                                              ║
+║ Release: Production Build                                                   ║
+║ Date: 2026-02-20                                                            ║
+║ Status: READY FOR DISTRIBUTION                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+════════════════════════════════════════════════════════════════════════════════
+📦 WHAT YOU HAVE
+════════════════════════════════════════════════════════════════════════════════
+
+Location: dist/OfflineIndustrialIntelligence/
+
+Inside This Folder:
+  └── OfflineIndustrialIntelligence.exe       ← The main application
+  └── OfflineIndustrialIntelligence.pkg       ← Python code bundle
+  └── PYZ-00.pyz                              ← Python libraries
+  └── base_library.zip                        ← Base Python
+  └── localpycs/                              ← Cached bytecode
+  └── qt.conf                                 ← Qt configuration
+  └── Supporting files
+
+════════════════════════════════════════════════════════════════════════════════
+🚀 INSTALLATION & DEPLOYMENT
+════════════════════════════════════════════════════════════════════════════════
+
+METHOD 1: Direct Deployment (Recommended)
+──────────────────────────────────────────────────────────────────────────────
+
+1. Copy the entire folder:
+   From: dist\OfflineIndustrialIntelligence\
+   To:   C:\Program Files\OfflineIndustrialIntelligence\
+   (or any location on your deployment machine)
+
+2. Create shortcut (optional):
+   Right-click OfflineIndustrialIntelligence.exe
+   → Send To → Desktop (create shortcut)
+
+3. Run:
+   Double-click OfflineIndustrialIntelligence.exe
+   OR
+   Click desktop shortcut
+
+
+METHOD 2: USB Distribution
+──────────────────────────────────────────────────────────────────────────────
+
+1. Copy folder to USB:
+   dist\OfflineIndustrialIntelligence\ → USB:\
+
+2. On target machine:
+   Copy from USB to hard drive (C:\temp\ or any location)
+
+3. Run:
+   Navigate to copied folder
+   Double-click OfflineIndustrialIntelligence.exe
+
+
+METHOD 3: ZIP Archive Distribution
+──────────────────────────────────────────────────────────────────────────────
+
+1. Create archive:
+   1. Download 7-Zip or WinRAR (if not installed)
+   2. Right-click: dist\OfflineIndustrialIntelligence\
+   3. Add to archive → OfflineIndustrialIntelligence.zip
+   4. Compressed size: ~25-30 MB
+
+2. Distribute ZIP file:
+   - Email
+   - Share drive
+   - Internal portal
+
+3. User extracts:
+   Extract OfflineIndustrialIntelligence.zip anywhere
+   Double-click OfflineIndustrialIntelligence.exe
+
+
+════════════════════════════════════════════════════════════════════════════════
+⚙️ SYSTEM REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+MINIMUM:
+  • Windows 10 or later
+  • 500 MB free disk space
+  • 2 GB RAM (4 GB recommended)
+
+OPTIONAL:
+  • Internet (not required - app is fully offline)
+  • GPU (not required - ML runs on CPU)
+  • Python installed (not required - included in build)
+
+════════════════════════════════════════════════════════════════════════════════
+✅ QUICK VERIFICATION CHECKLIST
+════════════════════════════════════════════════════════════════════════════════
+
+After deployment, verify:
+
+□ Application launches without errors
+□ No missing DLL messages
+□ Dashboard window appears
+□ Application icon visible in title bar
+□ File menu works
+□ Export functions available
+□ No console window appears
+
+════════════════════════════════════════════════════════════════════════════════
+🎯 FEATURES & CAPABILITIES
+════════════════════════════════════════════════════════════════════════════════
+
+EQUIPMENT ANALYSIS:
+  ✓ Top failing equipment identification
+  ✓ Downtime analysis and aggregation
+  ✓ Risk scoring (HIGH/MEDIUM/LOW)
+  ✓ Failure type distribution
+  ✓ Root cause ranking
+  ✓ Technician workload analysis
+  ✓ Spare part pattern detection
+
+ANALYTICS & INSIGHTS:
+  ✓ Equipment frequency analysis
+  ✓ Data quality assessment
+  ✓ ML-based anomaly detection
+  ✓ Trend forecasting
+  ✓ Rule-based violation detection
+  ✓ Severity escalation
+
+DASHBOARD & REPORTING:
+  ✓ Auto-generated dashboard
+  ✓ 13 widget types
+  ✓ 7 chart types (line, bar, gauge, etc.)
+  ✓ Responsive layouts
+  ✓ Equipment risk visualization
+
+EXPORTS:
+  ✓ Excel (multi-sheet with formatting)
+  ✓ PDF (professional multi-page reports)
+  ✓ CSV (batch export of data)
+  ✓ Timestamped filenames
+
+════════════════════════════════════════════════════════════════════════════════
+🔒 SECURITY & OFFLINE BEHAVIOR
+════════════════════════════════════════════════════════════════════════════════
+
+✅ FULLY OFFLINE:
+  • NO internet connectivity required
+  • NO external API calls
+  • NO cloud dependencies
+  • ALL processing local
+
+✅ SELF-CONTAINED:
+  • NO Python installation needed
+  • NO dependencies to install
+  • NO DLL errors possible
+  • Works on ANY Windows machine
+
+✅ NO CONFIGURATION NEEDED:
+  • NO environment variables
+  • NO config files to edit
+  • NO setup wizard
+  • Just double-click and run
+
+✅ DETERMINISTIC:
+  • Same input → Same output
+  • Reproducible analysis
+  • Seed-based randomness
+
+════════════════════════════════════════════════════════════════════════════════
+📊 WHAT DATA THIS SYSTEM ANALYZES
+════════════════════════════════════════════════════════════════════════════════
+
+Accepts: Breakdown/maintenance records with fields:
+  • Equipment ID
+  • Downtime hours
+  • Failure type
+  • Root cause
+  • Technician assigned
+  • Spare parts replaced
+  • Service quality metrics
+  • Dates and timestamps
+
+Outputs: 
+  • Equipment intelligence
+  • Risk assessments
+  • Predictive insights
+  • Visual dashboards
+  • Exportable reports
+
+════════════════════════════════════════════════════════════════════════════════
+🔧 TROUBLESHOOTING
+════════════════════════════════════════════════════════════════════════════════
+
+IF: Application won't launch
+→ Check: Windows 10+ installed
+→ Check: 500 MB disk space available
+→ Try: Run as Administrator
+
+IF: "Missing DLL" error
+→ This should NOT happen (all included)
+→ If it does, reinstall entire folder
+
+IF: Dashboard doesn't render
+→ Check: Application fully loaded
+→ Try: Resize window
+→ Try: Restart application
+
+IF: Export fails
+→ Check: Sufficient disk space
+→ Check: Output folder permissions
+→ Try: Export to Desktop
+
+IF: Crashes on data load
+→ Check: Data file format (CSV/Parquet)
+→ Check: Data has required columns
+→ See: Data format specifications
+
+════════════════════════════════════════════════════════════════════════════════
+📞 SUPPORT & DOCUMENTATION
+════════════════════════════════════════════════════════════════════════════════
+
+Documentation Files in Workspace:
+  • BUILD_RELEASE_NOTES.txt    ← Technical build details
+  • README.md                  ← Project overview
+  • MD/                        ← Comprehensive guides
+
+For Technical Details:
+  • All module documentation in MD/ folder
+  • Architecture diagrams
+  • Data flow specifications
+  • Code organization guide
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 YOU'RE READY TO DEPLOY!
+════════════════════════════════════════════════════════════════════════════════
+
+Next Step:
+  1. Navigate to: dist\OfflineIndustrialIntelligence\
+  2. Copy or archive the folder
+  3. Deploy to target location
+  4. User double-clicks OfflineIndustrialIntelligence.exe
+  5. Application runs - fully offline, fully functional
+
+This is a PRODUCTION-READY build with NO external dependencies.
+Deploy with confidence.
+
+════════════════════════════════════════════════════════════════════════════════

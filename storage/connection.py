@@ -1,11 +1,16 @@
 # storage/connection.py
 
+import os
 import duckdb
 from pathlib import Path
 from threading import Lock
 
-# Database file path (offline, file-based)
-DB_PATH = Path(__file__).parent / "offline_endurance_intelligence.duckdb"
+# Database file path - use AppData (writable location, not Program Files)
+_APP_NAME = "OfflineIndustrialIntelligence"
+_BASE_DIR = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / _APP_NAME
+_STORAGE_DIR = _BASE_DIR / "storage"
+_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = _STORAGE_DIR / "offline_endurance_intelligence.duckdb"
 
 # Thread-safe singleton connection
 _connection = None

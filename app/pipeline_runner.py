@@ -31,10 +31,12 @@ from storage.repositories.run_repo import RunRepository, RunStatus
 from storage.repositories.ingestion_repo import IngestionRepository
 from storage.repositories.feature_store_repo import FeatureStoreRepository
 from storage.repositories.profiling_repo import ProfilingRepository
+from storage.repositories.insight_repo import InsightRepository
 from ingestion.upload_handler import handle_file_upload
 from profiling.column_classifier import ColumnClassifier
 from profiling.data_profiler import DataProfiler
 from profiling.data_health import compute_data_health
+from profiling.equipment_analyzer import EquipmentAnalyzer
 from rule_engine.threshold_engine import ThresholdEngine
 from rule_engine.maintenance_rules import (
     PMOverdueRule,
@@ -47,6 +49,11 @@ from ml_engine import MLEngine
 from orchestration.insight_orchestrator import InsightOrchestrator
 from orchestration.severity_scoring import SeverityScorer
 from orchestration.prioritization import InsightPrioritizer
+from dashboard_engine.blueprint_generator import BlueprintGenerator
+from storage.repositories.dashboard_repo import DashboardRepository
+from export.excel_exporter import ExcelExporter
+from export.pdf_exporter import PDFExporter
+from export.csv_exporter import CSVExporter
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -55,6 +62,8 @@ run_repo = RunRepository()
 ingestion_repo = IngestionRepository()
 feature_store_repo = FeatureStoreRepository()
 profiling_repo = ProfilingRepository()
+insight_repo = InsightRepository()
+dashboard_repo = DashboardRepository()
 
 
 class PipelineRunner:
@@ -186,6 +195,27 @@ class PipelineRunner:
                 f"Profiling failed (non-fatal): {exc}"
             )
 
+        # ── Step 5.5: Equipment Analysis (Module 2.5 - Business Intelligence) ──
+        equipment_intelligence = {}
+        try:
+            output_path = ingestion_result.get("output_path")
+            if output_path:
+                df = pd.read_parquet(output_path)
+                
+                equipment_analyzer = EquipmentAnalyzer(logger=logger)
+                equipment_intelligence = equipment_analyzer.analyze(df)
+                
+                logger.info(
+                    f"Equipment analysis complete: "
+                    f"{equipment_intelligence.get('equipment_frequency', {}).get('total_equipment', 0)} equipment, "
+                    f"{equipment_intelligence.get('equipment_frequency', {}).get('total_breakdowns', 0)} breakdowns"
+                )
+        except Exception as exc:
+            # Equipment analysis is best-effort
+            logger.warning(
+                f"Equipment analysis failed (non-fatal): {exc}"
+            )
+
         # ── Step 6: Run ML Engine (Module 4) ──
         ml_findings = []
         try:
@@ -234,6 +264,7 @@ class PipelineRunner:
                 rule_findings=rule_findings,
                 ml_findings=ml_findings,
                 profiling_results=profiling_result if profiling_result else None,
+                equipment_intelligence=equipment_intelligence if equipment_intelligence else None,
             )
             
             # Apply severity scoring
@@ -253,7 +284,73 @@ class PipelineRunner:
                 f"Insight orchestration failed (non-fatal): {exc}"
             )
 
-        # ── Step 9: Mark run as successful ──
+        # ── Step 8.5: Save insights to repository ──
+        try:
+            insight_repo.save_insights(run_id=run_id, insights=unified_insights)
+            logger.info(f"Insights saved to repository: {len(unified_insights)} insights")
+        except Exception as exc:
+            logger.warning(f"Failed to save insights to repository (non-fatal): {exc}")
+
+        # ── Step 9: Generate dashboard blueprint (Module 6) ──
+        dashboard_blueprint = None
+        try:
+            blueprint_generator = BlueprintGenerator(logger=logger)
+            dashboard_blueprint = blueprint_generator.generate(
+                run_id=run_id,
+                unified_insights=unified_insights,
+                profiling_results=profiling_result if profiling_result else None,
+            )
+            dashboard_repo.save_dashboard_blueprint(
+                run_id=run_id,
+                blueprint=blueprint_generator.to_dict(dashboard_blueprint),
+            )
+            logger.info(
+                f"Dashboard blueprint generated: {len(dashboard_blueprint.sections)} sections"
+            )
+        except Exception as exc:
+            # Dashboard generation is best-effort
+            logger.warning(
+                f"Dashboard generation failed (non-fatal): {exc}"
+            )
+
+        # ── Step 11: Generate exports (Module 7) ──
+        export_files = {}
+        try:
+            # Excel export
+            excel_exporter = ExcelExporter(logger=logger)
+            excel_report = excel_exporter.export_full_report(
+                run_id=run_id,
+                unified_insights=unified_insights,
+                profiling_results=profiling_result if profiling_result else None,
+            )
+            export_files["excel_report"] = excel_report
+            
+            # PDF export
+            pdf_exporter = PDFExporter(logger=logger)
+            pdf_report = pdf_exporter.export_comprehensive_report(
+                run_id=run_id,
+                unified_insights=unified_insights,
+                profiling_results=profiling_result if profiling_result else None,
+            )
+            export_files["pdf_report"] = pdf_report
+            
+            # CSV export (batch)
+            csv_exporter = CSVExporter(logger=logger)
+            csv_files = csv_exporter.export_batch(
+                run_id=run_id,
+                unified_insights=unified_insights,
+                profiling_results=profiling_result if profiling_result else None,
+            )
+            export_files.update(csv_files)
+            
+            logger.info(f"Exports generated: {len(export_files)} files")
+        except Exception as exc:
+            # Exports are best-effort
+            logger.warning(
+                f"Export generation failed (non-fatal): {exc}"
+            )
+
+        # ── Step 12: Mark run as successful ──
         run_repo.update_status(run_id, RunStatus.SUCCESS)
         logger.info(f"Pipeline complete for run {run_id}")
 
@@ -271,6 +368,8 @@ class PipelineRunner:
             "triggered_rules": triggered_rules,
             "unified_insights_count": len(unified_insights),
             "unified_insights": unified_insights,
+            "dashboard_blueprint": dashboard_blueprint.to_dict() if dashboard_blueprint else None,
+            "export_files": export_files,
             "output_path": ingestion_result.get("output_path"),
         }
 

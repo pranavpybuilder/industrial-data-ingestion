@@ -2,11 +2,13 @@
 
 import logging
 import sys
+import os
 from pathlib import Path
 from datetime import datetime
 
 
-_LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+# Use AppData\Local for logs (writable location, not Program Files)
+_LOG_DIR = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "OfflineIndustrialIntelligence" / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _INITIALIZED_LOGGERS = set()

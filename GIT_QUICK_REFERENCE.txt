@@ -1,0 +1,200 @@
+═══════════════════════════════════════════════════════════════════════════════════════
+                    QUICK GIT COMMANDS - FUTURE REFERENCE
+═══════════════════════════════════════════════════════════════════════════════════════
+
+CURRENT STATUS:
+  Branch: develop
+  Last Commit: 7a3f88a (Session 3: ML Engine + Orchestration Complete)
+  Remote: origin/develop (pushed successfully)
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                              COMMON GIT WORKFLOWS
+═══════════════════════════════════════════════════════════════════════════════════════
+
+1️⃣ COMMIT & PUSH NEW CHANGES:
+   ─────────────────────────────
+
+   cd c:\Users\Maintenance\Downloads\offline_endurance_intelligence
+
+   # Option A: Using automated script (PowerShell)
+   PowerShell -ExecutionPolicy Bypass -File GIT_PUSH_COMMANDS.ps1
+
+   # Option B: Manual commands
+   git add -A
+   git status --short                    # Review changes
+   git commit -m "Your message here"
+   git push origin develop
+
+   # Option C: Specific file commits
+   git add path/to/file.py
+   git commit -m "Update: specific change"
+   git push origin develop
+
+
+2️⃣ CHECK STATUS:
+   ──────────────
+
+   git status                            # See all changes
+   git log --oneline -n 5                # Last 5 commits
+   git remote -v                         # Check remote URL
+   git branch -v                         # Check branches
+
+
+3️⃣ PULL LATEST CHANGES:
+   ──────────────────────
+
+   git fetch origin                      # Get latest metadata
+   git pull origin develop               # Merge develop branch
+
+
+4️⃣ MERGE TO MAIN (when ready):
+   ───────────────────────────
+
+   git checkout main                     # Switch to main
+   git pull origin main                  # Get latest main
+   git merge develop                     # Merge develop into main
+   git push origin main                  # Push to main
+   git checkout develop                  # Switch back to develop
+
+
+5️⃣ CREATE FEATURE BRANCH:
+   ──────────────────────
+
+   git checkout -b feature/module-6-dashboard
+   # Make changes...
+   git add -A
+   git commit -m "Feature: Add dashboard module"
+   git push origin feature/module-6-dashboard
+   # Create Pull Request on GitHub
+
+
+6️⃣ VIEW COMMIT HISTORY:
+   ────────────────────
+
+   git log --oneline                     # Short log
+   git log --oneline --graph --all       # Visual tree
+   git show 7a3f88a                      # Show specific commit
+   git diff HEAD~1 HEAD                  # Compare with previous
+
+
+7️⃣ UNDO LAST COMMIT (if needed):
+   ───────────────────────────────
+
+   # Keep changes, undo commit
+   git reset --soft HEAD~1
+
+   # Discard changes completely
+   git reset --hard HEAD~1
+
+
+8️⃣ STASH WORK IN PROGRESS:
+   ────────────────────────
+
+   git stash                             # Save uncommitted changes
+   git stash list                        # See all stashes
+   git stash pop                         # Restore latest stash
+   git stash drop                        # Discard stash
+
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                              REPOSITORY INFORMATION
+═══════════════════════════════════════════════════════════════════════════════════════
+
+Repository Name: offline-endurance-intelligence (renamed: industrial-data-ingestion)
+Default Branch: develop
+Remote URL: https://github.com/pranavpybuilder/industrial-data-ingestion.git
+
+Branch Structure:
+  main .......... Production-ready code
+  develop ...... Active development (current location)
+  feature/* ... Feature branches for new modules
+
+Current HEAD:
+  Branch: develop
+  Commit: 7a3f88a
+  Author: Session 3 Implementation
+  Message: Session 3: ML Engine (Module 4) + Orchestration (Module 5) Complete
+
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                              PUSH COMMAND (COPY-PASTE READY)
+═══════════════════════════════════════════════════════════════════════════════════════
+
+TO PUSH CHANGES FROM CURRENT LOCATION:
+
+# Full automated push (uses script):
+PowerShell -ExecutionPolicy Bypass -File GIT_PUSH_COMMANDS.ps1
+
+
+# OR manual step-by-step:
+
+git add -A
+git status --short
+git commit -m "Session X: Description of changes"
+git push origin develop
+
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                            KEY PROJECT DIRECTORIES
+═══════════════════════════════════════════════════════════════════════════════════════
+
+Source Code Organization:
+  ├─ ml_engine/ ................... Module 4 (Permanent ML)
+  ├─ orchestration/ .............. Module 5 (Rule + ML Merging)
+  ├─ rule_engine/ ................ Module 3 (Rules)
+  ├─ profiling/ .................. Module 2 (Profiling)
+  ├─ ingestion/ .................. Module 1 (Ingestion)
+  ├─ app/ ........................ Pipeline runner
+  ├─ tests/ ...................... Test suite
+  ├─ MD/ ......................... 📍 All documentation
+
+Important Files:
+  ├─ app/pipeline_runner.py ....... 9-step pipeline
+  ├─ requirements.txt ............ Python dependencies
+  ├─ README.md ................... Project overview
+  ├─ SESSION_3_SUMMARY.txt ....... Session 3 completion details
+  ├─ CLEANUP_AND_PUSH_SUMMARY.txt  This commit summary
+
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                              TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════════════════
+
+Problem: "fatal: not a git repository"
+Solution: cd to project root folder (offline_endurance_intelligence)
+
+
+Problem: "Your branch is ahead of origin/develop by X commits"
+Solution: git push origin develop
+
+
+Problem: Cannot pull due to uncommitted changes
+Solution: git stash (to save), then git pull, then git stash pop
+
+
+Problem: Want to see what changed in last commit
+Solution: git show HEAD or git diff HEAD~1 HEAD
+
+
+Problem: Accidentally committed to wrong branch
+Solution: 
+  git reset --soft HEAD~1          (undo commit, keep changes)
+  git checkout correct-branch
+  git commit -m "message"
+  git push origin correct-branch
+
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                                  SUMMARY
+═══════════════════════════════════════════════════════════════════════════════════════
+
+✅ Project cleaned up
+✅ Documentation organized in MD/
+✅ Unnecessary files deleted
+✅ All changes committed (commit: 7a3f88a)
+✅ Successfully pushed to develop branch
+✅ Ready for next phase (Module 6-8)
+
+For upcoming commits, use the automated script or manual commands above.
+
+═══════════════════════════════════════════════════════════════════════════════════════

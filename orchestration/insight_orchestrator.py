@@ -33,35 +33,20 @@ class InsightOrchestrator:
                     run_id: str,
                     rule_findings: List[Dict],
                     ml_findings: List[Dict],
-                    profiling_results: Optional[Dict] = None) -> List[Dict]:
+                    profiling_results: Optional[Dict] = None,
+                    equipment_intelligence: Optional[Dict] = None) -> List[Dict]:
         """
         Main orchestration method
         
         Args:
             run_id: Run identifier
             rule_findings: Findings from Module 3 (Rules Engine)
-                          Format: List[{rule_name, affected_columns, severity, confidence, ...}]
-            
             ml_findings: Findings from Module 4 (ML Engine)
-                        Format: List[{type, feature_name, severity, confidence, ...}]
-            
             profiling_results: Optional profiling context from Module 2
+            equipment_intelligence: Optional equipment-level analytics from Module 2.5
         
         Returns:
-            Combined insights: List[{
-                insight_id,
-                run_id,
-                source,  # "RULE" or "ML" or "MERGED"
-                severity,
-                confidence,
-                feature_name / affected_columns,
-                description,
-                remediation,
-                rule_confidence,  # If from rule
-                ml_confidence,    # If from ML
-                merged_confidence,
-                created_at
-            }]
+            Combined insights with sourcing and priority
         """
         
         self.logger.info("=" * 80)
@@ -73,11 +58,15 @@ class InsightOrchestrator:
             self.logger.info("\n[1/5] Normalizing findings...")
             rule_findings = rule_findings or []
             ml_findings = ml_findings or []
+            equipment_intelligence = equipment_intelligence or {}
             
             normalized_rules = self._normalize_rule_findings(rule_findings)
             normalized_ml = self._normalize_ml_findings(ml_findings)
+            equipment_insights = self._extract_equipment_insights(equipment_intelligence)
             
             self.logger.info(f"      ✓ {len(normalized_rules)} rule findings normalized")
+            self.logger.info(f"      ✓ {len(normalized_ml)} ML findings normalized")
+            self.logger.info(f"      ✓ {len(equipment_insights)} equipment insights extracted")
             self.logger.info(f"      ✓ {len(normalized_ml)} ML findings normalized")
             
             # STEP 2: Build resource index
@@ -102,6 +91,10 @@ class InsightOrchestrator:
             # STEP 5: Format for output
             self.logger.info("\n[5/5] Formatting for output...")
             final_insights = self._format_insights(run_id, merged_insights)
+            
+            # Add equipment analysis insights
+            final_insights.extend(self._format_insights(run_id, equipment_insights))
+            
             self.logger.info(f"      ✓ {len(final_insights)} insights formatted")
             
             self.logger.info("\n" + "=" * 80)
@@ -110,6 +103,7 @@ class InsightOrchestrator:
             self.logger.info(f"  RULE-only: {len([i for i in final_insights if i['source'] == 'RULE'])}")
             self.logger.info(f"  ML-only: {len([i for i in final_insights if i['source'] == 'ML'])}")
             self.logger.info(f"  MERGED: {len([i for i in final_insights if i['source'] == 'MERGED'])}")
+            self.logger.info(f"  EQUIPMENT: {len([i for i in final_insights if i['source'] == 'EQUIPMENT_ANALYSIS'])}")
             self.logger.info("=" * 80 + "\n")
             
             return final_insights
@@ -373,4 +367,69 @@ class InsightOrchestrator:
             finding_type = finding.get("finding_type", "Anomaly")
             return f"{severity}: ML {finding_type} on {resource}"
         else:  # MERGED
-            return f"{severity}: Rule + ML Agreement on {resource}"
+            return f"{severity}: Rule + ML Agreement on {resource}"    
+    
+    def _extract_equipment_insights(self, equipment_intelligence: Dict) -> List[Dict]:
+        """Extract high-value insights from equipment analysis"""
+        
+        insights = []
+        
+        if not equipment_intelligence:
+            return insights
+        
+        # High-risk equipment alerts
+        for eq_risk in equipment_intelligence.get("equipment_risk_scores", []):
+            if eq_risk.get("risk_category") == "HIGH":
+                insights.append({
+                    "source": "EQUIPMENT_ANALYSIS",
+                    "severity": "WARNING",
+                    "resource": eq_risk.get("equipment_id"),
+                    "finding_type": "High Risk Equipment",
+                    "description": f"Equipment {eq_risk.get('equipment_id')} classified as HIGH RISK. "
+                                   f"Risk score: {eq_risk.get('risk_score', 0):.2f}",
+                    "remediation": eq_risk.get("recommendation", "Implement preventive maintenance"),
+                    "confidence": eq_risk.get("risk_score", 0),
+                })
+        
+        # Extreme downtime alerts
+        downtime = equipment_intelligence.get("downtime_analysis", {})
+        if downtime.get("extreme_events_count", 0) > 0:
+            insights.append({
+                "source": "EQUIPMENT_ANALYSIS",
+                "severity": "WARNING",
+                "resource": "Downtime",
+                "finding_type": "Extreme Downtime",
+                "description": f"{downtime.get('extreme_events_count')} breakdowns exceeded "
+                              f"{downtime.get('extreme_threshold_hours')} hour threshold",
+                "remediation": "Investigate root causes of extended downtime periods",
+                "confidence": 0.85,
+            })
+        
+        # Repeat spare failure alerts
+        for spare_alert in equipment_intelligence.get("spare_patterns", {}).get("repeat_failure_alerts", []):
+            insights.append({
+                "source": "EQUIPMENT_ANALYSIS",
+                "severity": "MEDIUM",
+                "resource": spare_alert.get("spare"),
+                "finding_type": "Repeat Failure",
+                "description": f"Spare part '{spare_alert.get('spare')}' replaced "
+                              f"{spare_alert.get('replacement_count')} times",
+                "remediation": "Recommend preventive maintenance for affected equipment",
+                "confidence": 0.75,
+            })
+        
+        # Data quality alerts
+        for quality_issue in equipment_intelligence.get("data_quality", {}).get("quality_issues", []):
+            if quality_issue.get("severity") == "High":
+                insights.append({
+                    "source": "EQUIPMENT_ANALYSIS",
+                    "severity": "INFO",
+                    "resource": "Documentation",
+                    "finding_type": "Data Quality",
+                    "description": quality_issue.get("issue_type") + 
+                                  f" ({quality_issue.get('percentage', 0):.1f}% of records)",
+                    "remediation": "Improve documentation completeness and accuracy",
+                    "confidence": 0.80,
+                })
+        
+        return insights
