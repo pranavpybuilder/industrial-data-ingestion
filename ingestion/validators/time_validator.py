@@ -74,8 +74,11 @@ class TimeValidator:
     @staticmethod
     def _validate_no_future_time(df: pd.DataFrame, column: str) -> None:
         """
-        Ensure no timestamps exist in the future.
+        Warn (but do not reject) when timestamps are in the future.
+        Industrial data may contain scheduled or projected timestamps.
         """
+        import logging
+        _logger = logging.getLogger(__name__)
 
         now_utc = datetime.now(timezone.utc)
 
@@ -83,7 +86,7 @@ class TimeValidator:
 
         if future_mask.any():
             count = int(future_mask.sum())
-            raise ValueError(
-                f"Time validation failed: {count} future timestamps detected "
-                f"in column '{column}'"
+            _logger.warning(
+                f"Time validation notice: {count} future timestamps in "
+                f"column '{column}' (allowed — may be scheduled events)"
             )

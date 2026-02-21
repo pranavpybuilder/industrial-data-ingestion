@@ -24,6 +24,16 @@ class DashboardBlueprint:
         self.sections = []
         self.metadata = {}
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the blueprint to a plain dictionary."""
+        return {
+            "run_id": self.run_id,
+            "blueprint_id": self.blueprint_id,
+            "created_at": self.created_at,
+            "sections": self.sections,
+            "metadata": self.metadata,
+        }
+
 
 class BlueprintGenerator:
     """

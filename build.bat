@@ -1,11 +1,12 @@
 @echo off
-cd /d "c:\Users\Maintenance\Downloads\offline_endurance_intelligence"
+cd /d "%~dp0"
 "venv\Scripts\python.exe" -m PyInstaller frontend/electron_app/main/main.py ^
   --onefile ^
   --windowed ^
   --noconfirm ^
   --icon=app_icon.ico ^
   --add-data "frontend/electron_app/renderer/dist;frontend/electron_app/renderer/dist" ^
+  --add-data "storage/schema.sql;storage" ^
   --hidden-import sklearn ^
   --hidden-import scipy ^
   --hidden-import duckdb ^

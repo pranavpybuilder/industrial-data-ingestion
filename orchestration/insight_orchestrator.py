@@ -1,4 +1,4 @@
-"""
+﻿"""
 Insight Orchestrator - Module 5
 Merges Rule Findings (Module 3) + ML Findings (Module 4)
 Produces unified insights for Module 6 Dashboard and Module 7 Export
@@ -64,15 +64,15 @@ class InsightOrchestrator:
             normalized_ml = self._normalize_ml_findings(ml_findings)
             equipment_insights = self._extract_equipment_insights(equipment_intelligence)
             
-            self.logger.info(f"      ✓ {len(normalized_rules)} rule findings normalized")
-            self.logger.info(f"      ✓ {len(normalized_ml)} ML findings normalized")
-            self.logger.info(f"      ✓ {len(equipment_insights)} equipment insights extracted")
-            self.logger.info(f"      ✓ {len(normalized_ml)} ML findings normalized")
+            self.logger.info(f"      [OK] {len(normalized_rules)} rule findings normalized")
+            self.logger.info(f"      [OK] {len(normalized_ml)} ML findings normalized")
+            self.logger.info(f"      [OK] {len(equipment_insights)} equipment insights extracted")
+            self.logger.info(f"      [OK] {len(normalized_ml)} ML findings normalized")
             
             # STEP 2: Build resource index
             self.logger.info("\n[2/5] Building resource index...")
             resource_index = self._build_resource_index(normalized_rules, normalized_ml)
-            self.logger.info(f"      ✓ {len(resource_index)} unique resources identified")
+            self.logger.info(f"      [OK] {len(resource_index)} unique resources identified")
             
             # STEP 3: Merge findings by resource
             self.logger.info("\n[3/5] Merging findings by resource...")
@@ -81,12 +81,12 @@ class InsightOrchestrator:
                 normalized_ml, 
                 resource_index
             )
-            self.logger.info(f"      ✓ {len(merged_insights)} merged insights created")
+            self.logger.info(f"      [OK] {len(merged_insights)} merged insights created")
             
             # STEP 4: Apply business logic
             self.logger.info("\n[4/5] Applying orchestration logic...")
             merged_insights = self._apply_orchestration_logic(merged_insights)
-            self.logger.info(f"      ✓ Orchestration logic applied")
+            self.logger.info(f"      [OK] Orchestration logic applied")
             
             # STEP 5: Format for output
             self.logger.info("\n[5/5] Formatting for output...")
@@ -95,7 +95,7 @@ class InsightOrchestrator:
             # Add equipment analysis insights
             final_insights.extend(self._format_insights(run_id, equipment_insights))
             
-            self.logger.info(f"      ✓ {len(final_insights)} insights formatted")
+            self.logger.info(f"      [OK] {len(final_insights)} insights formatted")
             
             self.logger.info("\n" + "=" * 80)
             self.logger.info(f"Orchestration Complete")

@@ -42,22 +42,31 @@ class ExcelReader:
         if not path.exists():
             raise FileNotFoundError(f"Excel file not found: {path}")
 
-        if path.suffix.lower() not in [".xlsx", ".xls"]:
-            raise ValueError(
-                f"Unsupported Excel format: {path.suffix}"
-            )
+        suffix = path.suffix.lower()
 
-        try:
-            # Let pandas auto-detect the engine (Pylance-safe)
-            df = pd.read_excel(
-                str(path),
-                sheet_name=sheet_name,
-                header=header,
+        if suffix == ".csv":
+            # Allow CSV files to be read through the Excel reader path
+            try:
+                df = pd.read_csv(str(path), header=header)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to read CSV file {path}: {exc}"
+                ) from exc
+        elif suffix in [".xlsx", ".xls"]:
+            try:
+                df = pd.read_excel(
+                    str(path),
+                    sheet_name=sheet_name,
+                    header=header,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to read Excel file {path}: {exc}"
+                ) from exc
+        else:
+            raise ValueError(
+                f"Unsupported file format: {suffix}. Expected .xlsx, .xls, or .csv"
             )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to read Excel file {path}: {exc}"
-            ) from exc
 
         # Drop completely empty rows (very common in industrial files)
         df = df.dropna(how="all")

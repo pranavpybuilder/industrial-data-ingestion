@@ -16,6 +16,15 @@ class ReportExcelIngestor(BaseIngestor):
     - Contain downtime and 5-Why analysis
     """
 
+    # Required columns that MUST be present
+    REQUIRED_COLUMNS = [
+        "date",
+        "equipment_number",
+        "machine_name",
+        "downtime",
+    ]
+
+    # Full set of expected columns (optional ones logged as warnings)
     EXPECTED_COLUMNS = [
         "date",
         "equipment_number",
@@ -109,11 +118,19 @@ class ReportExcelIngestor(BaseIngestor):
             .str.replace(" ", "_")
         )
 
-        # Soft enforcement of expected columns
-        missing = set(self.EXPECTED_COLUMNS) - set(df.columns)
-        if missing:
+        # Hard-check: required columns must exist
+        missing_required = set(self.REQUIRED_COLUMNS) - set(df.columns)
+        if missing_required:
             raise ValueError(
-                f"Report Excel missing expected columns: {missing}"
+                f"Report Excel missing required columns: {missing_required}"
+            )
+
+        # Soft-check: warn about optional columns
+        missing_optional = set(self.EXPECTED_COLUMNS) - set(df.columns)
+        if missing_optional:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Report Excel missing optional columns (ignored): {missing_optional}"
             )
 
         # Remove fully empty rows

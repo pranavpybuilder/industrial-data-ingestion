@@ -39,7 +39,7 @@ def main() -> None:
     """
 
     logger.info("=" * 60)
-    logger.info("Offline Industrial Intelligence System – Starting")
+    logger.info("Offline Industrial Intelligence System - Starting")
     logger.info("=" * 60)
 
     # Initialize database
@@ -68,7 +68,7 @@ def main() -> None:
     )
 
     if result.get("success"):
-        logger.info("─" * 40)
+        logger.info("-" * 40)
         logger.info("PIPELINE RESULT: SUCCESS")
         logger.info(f"  Run ID      : {result['run_id']}")
         logger.info(f"  File        : {result['file_name']}")
@@ -80,12 +80,12 @@ def main() -> None:
         if health_score is not None:
             logger.info(f"  Health Score: {health_score:.1f}/100")
         logger.info(f"  Output      : {result['output_path']}")
-        logger.info("─" * 40)
+        logger.info("-" * 40)
     else:
-        logger.error("─" * 40)
+        logger.error("-" * 40)
         logger.error("PIPELINE RESULT: FAILED")
         logger.error(f"  Error: {result.get('error')}")
-        logger.error("─" * 40)
+        logger.error("-" * 40)
 
 
 if __name__ == "__main__":

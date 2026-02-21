@@ -599,11 +599,13 @@ class PipelineRunner:
         
         try:
             # Load feature store for ML analysis
-            features_df = feature_store_repo.get_features_for_run(run_id)
+            features_list = feature_store_repo.get_features_for_run(run_id)
             
-            if features_df is None or features_df.empty:
+            if not features_list:
                 logger.warning("No features in feature store for ML analysis.")
                 return []
+            
+            features_df = pd.DataFrame(features_list)
             
             logger.info(f"ML analysis starting with {len(features_df)} features")
             

@@ -56,8 +56,16 @@ export interface DashboardBlueprint {
   title: string;
   widgets: Array<{
     widgetId: string;
-    widgetType: "chart" | "metric" | "map" | "text" | "image";
+    widgetType: "chart" | "metric" | "map" | "text" | "image" | "table";
+    title?: string;
     allowedVisualTypes?: string[];
+    gridSpan?: number;
+    sectionId?: string;
+  }>;
+  sections?: Array<{
+    sectionId: string;
+    title: string;
+    order: number;
   }>;
 }
 

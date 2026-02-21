@@ -52,7 +52,7 @@ class PDFExporter:
         ))
         
         self.styles.add(ParagraphStyle(
-            name="Normal",
+            name="CustomNormal",
             parent=self.styles["Normal"],
             fontSize=11,
             leading=14,

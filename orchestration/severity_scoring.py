@@ -84,7 +84,8 @@ class SeverityScorer:
     
     def get_top_insights(self, insights: List[Dict], top_n: int = 10) -> List[Dict]:
         """Get top N insights by priority"""
-        return sorted_insights[:top_n]
+        scored = sorted(insights, key=lambda x: x.get("priority_score", 0), reverse=True)
+        return scored[:top_n]
     
     
     def categorize_by_severity(self, insights: List[Dict]) -> Dict[str, List[Dict]]:

@@ -3,7 +3,7 @@ REM Production Build Script
 REM Offline Industrial Data Intelligence System
 REM =========================================
 
-cd /d "c:\Users\Maintenance\Downloads\offline_endurance_intelligence"
+cd /d "%~dp0"
 
 echo Cleaning previous builds...
 if exist build rmdir /s /q build
@@ -26,6 +26,7 @@ echo Starting build...
   --icon=app_icon.ico ^
   --name OfflineIndustrialIntelligence ^
   --add-data "frontend/electron_app/renderer/dist;frontend/electron_app/renderer/dist" ^
+  --add-data "storage/schema.sql;storage" ^
   --hidden-import sklearn ^
   --hidden-import scipy ^
   --hidden-import duckdb ^

@@ -33,6 +33,16 @@ class OperationalExcelIngestor(BaseIngestor):
         )
 
     # ------------------------------------------------------------------
+    # Mandatory abstract method implementation
+    # ------------------------------------------------------------------
+
+    def read(self) -> pd.DataFrame:
+        """
+        Read raw data from file (Excel or CSV).
+        """
+        return self._read_raw_sheet()
+
+    # ------------------------------------------------------------------
     # Public entry point
     # ------------------------------------------------------------------
 
@@ -48,9 +58,23 @@ class OperationalExcelIngestor(BaseIngestor):
 
         output_paths = self._persist_tables(tables, metadata)
 
+        # Determine a combined row count and column list from extracted tables
+        total_rows = sum(len(t["data"]) for t in tables) if tables else len(raw_df)
+        all_columns = []
+        for t in tables:
+            all_columns.extend([c for c in t["data"].columns if c not in all_columns])
+        if not all_columns:
+            all_columns = list(raw_df.columns)
+
         return {
             "source": self.source_name,
             "run_id": self.run_id,
+            "file_name": Path(self.source_path).name,
+            "rows": total_rows,
+            "columns": all_columns,
+            "schema_hash": self._generate_schema_hash(raw_df),
+            "output_path": output_paths[0] if output_paths else str(self.output_dir),
+            "ingested_at": self.ingestion_time.isoformat(),
             "tables_detected": len(tables),
             "output_paths": output_paths,
             "metadata": metadata,
