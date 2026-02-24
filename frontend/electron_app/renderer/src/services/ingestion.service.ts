@@ -1,20 +1,36 @@
 import { IngestionRequest, IngestionResult } from "../contracts/ingestion.contract";
+import { frontendApi } from "./frontendApi";
 
-/**
- * MOCK OFFLINE INGESTION SERVICE
- * (Later replaced with IPC / backend call)
- */
 export async function ingestData(
   payload: IngestionRequest
 ): Promise<IngestionResult> {
-  console.log("Ingestion payload:", payload);
+  const filePath = (payload.file as any)?.path || "";
+  if (!filePath) {
+    return {
+      success: false,
+      message: "Desktop ingestion requires an absolute local file path.",
+    };
+  }
 
-  // simulate processing delay
-  await new Promise((r) => setTimeout(r, 800));
+  const sourceMap: Record<string, string> = {
+    SAP_PM: "sap",
+    RFID: "rfid",
+    PLC: "plc",
+    ENERGY: "generic_tabular",
+  };
+  const sourceType = sourceMap[payload.ingestionType] || "generic_tabular";
+
+  const response = await frontendApi.uploadFile(filePath, sourceType);
+  if (!response.success) {
+    return {
+      success: false,
+      message: response.message || "Ingestion failed",
+    };
+  }
 
   return {
     success: true,
-    runId: `${payload.ingestionType}_${Date.now()}`,
-    message: "Ingestion successful",
+    runId: response.data?.run_id,
+    message: response.message || "Ingestion successful",
   };
 }

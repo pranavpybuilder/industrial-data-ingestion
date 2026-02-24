@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+from typing import Optional
 
 from ingestion.base_ingestor import BaseIngestor
 from ingestion.readers.csv_reader import CSVReader
@@ -20,12 +21,15 @@ class SAPIngestor(BaseIngestor):
         source_path: str,
         schema_path: str,
         output_dir: str = "data/raw/sap",
+        run_id: Optional[str] = None,
     ):
         super().__init__(
-            source_name="sap_iw29",
+            source_name="sap",
             source_path=source_path,
             schema_path=schema_path,
             output_dir=output_dir,
+            run_id=run_id,
+            schema_type="sap",
         )
 
     # ------------------------------------------------------------------
@@ -64,19 +68,13 @@ class SAPIngestor(BaseIngestor):
         """
         Extend base ingestion with SAP-specific normalization.
         """
-
-        df = self.read()
-        self._validate_not_empty(df)
-
-        df = self._normalize_sap_columns(df)
-
-        # Standard pipeline
-        self._validate_schema(df)
-        self._validate_types(df)
-        self._validate_time(df)
-
-        versioned_path = self._persist(df)
-        return self._build_metadata(versioned_path, df)
+        raw_df = self.read()
+        self._validate_not_empty(raw_df)
+        normalized_df = self._normalize_sap_columns(raw_df)
+        return self.ingest_dataframe(
+            data=normalized_df,
+            original_column_snapshot=list(raw_df.columns),
+        )
 
     # ------------------------------------------------------------------
     # SAP-specific logic

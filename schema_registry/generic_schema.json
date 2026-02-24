@@ -1,0 +1,98 @@
+{
+  "source_type": "generic",
+  "schema_version": "1.0.0",
+  "description": "Canonical generic tabular schema",
+  "canonical_fields": [
+    {
+      "canonical_name": "equipment_id",
+      "aliases": ["equipment_id", "equipment", "machine_id", "machine_name", "asset_id"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "event_time",
+      "aliases": ["event_time", "date", "timestamp", "created_on", "time"],
+      "required": false,
+      "data_type": "datetime",
+      "transform_rule": "to_datetime_utc"
+    },
+    {
+      "canonical_name": "breakdown_count",
+      "aliases": ["breakdown_count", "breakdown", "failure_count"],
+      "required": false,
+      "data_type": "int",
+      "transform_rule": "to_int_default_one"
+    },
+    {
+      "canonical_name": "downtime_hours",
+      "aliases": ["downtime", "downtime_hours", "duration", "breakdown_dur"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "failure_type",
+      "aliases": ["failure_type", "coding_code_txt", "event_type", "issue_type", "fault_type"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "root_cause",
+      "aliases": ["root_cause", "cause", "why1", "problem_cause"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "technician",
+      "aliases": ["technician", "reported_by", "created_by", "owner"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "parameter_name",
+      "aliases": ["parameter_name", "tag_name", "metric_name", "signal_name"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "parameter_value",
+      "aliases": ["parameter_value", "value", "metric_value", "reading"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "energy_kwh",
+      "aliases": ["energy_kwh", "daily_consumption", "consumption_kwh", "kwh"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "production_units",
+      "aliases": ["products", "production_qty", "production_units", "units"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "tag_id",
+      "aliases": ["tag_id", "rfid_tag", "tag"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "reader_id",
+      "aliases": ["reader_id", "scanner_id", "reader"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    }
+  ]
+}

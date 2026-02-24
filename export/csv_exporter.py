@@ -6,6 +6,8 @@ import csv
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from utils.paths import EXPORT_DIR
+
 
 class CSVExporter:
     """
@@ -20,7 +22,7 @@ class CSVExporter:
         self,
         run_id: str,
         unified_insights: List[Dict[str, Any]],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export unified insights to CSV file.
@@ -56,7 +58,7 @@ class CSVExporter:
         self,
         run_id: str,
         unified_insights: List[Dict[str, Any]],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export insights summary statistics to CSV.
@@ -147,7 +149,7 @@ class CSVExporter:
         self,
         run_id: str,
         profiling_results: Dict[str, Any],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export column profiling results to CSV file.
@@ -211,7 +213,7 @@ class CSVExporter:
         self,
         run_id: str,
         profiling_results: Dict[str, Any],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export data quality metrics and issues to CSV.
@@ -271,7 +273,7 @@ class CSVExporter:
         run_id: str,
         unified_insights: List[Dict[str, Any]],
         profiling_results: Optional[Dict[str, Any]] = None,
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> Dict[str, str]:
         """
         Export all insights and profiling data to batch of CSV files.

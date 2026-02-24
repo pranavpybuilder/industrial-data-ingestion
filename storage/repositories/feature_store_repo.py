@@ -8,6 +8,7 @@ Schema (from schema.sql):
 """
 
 from typing import List, Dict
+import pandas as pd
 from storage.connection import get_connection
 
 
@@ -43,7 +44,7 @@ class FeatureStoreRepository:
                 ),
             )
 
-    def get_features_for_run(self, run_id: str) -> List[Dict]:
+    def get_features_for_run(self, run_id: str) -> pd.DataFrame:
         """
         Retrieve all features for a given run.
         """
@@ -58,15 +59,15 @@ class FeatureStoreRepository:
             (run_id,),
         ).fetchall()
 
-        return [
-            {
-                "feature_name": r[0],
-                "feature_value": r[1],
-                "feature_type": r[2],
-                "timestamp": r[3],
-            }
-            for r in rows
-        ]
+        if not rows:
+            return pd.DataFrame(
+                columns=["feature_name", "feature_value", "feature_type", "timestamp"]
+            )
+
+        return pd.DataFrame(
+            rows,
+            columns=["feature_name", "feature_value", "feature_type", "timestamp"],
+        )
 
     def has_features(self, run_id: str) -> bool:
         conn = get_connection()

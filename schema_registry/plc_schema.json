@@ -1,0 +1,70 @@
+{
+  "source_type": "plc",
+  "schema_version": "1.0.0",
+  "description": "Canonical PLC telemetry schema",
+  "canonical_fields": [
+    {
+      "canonical_name": "equipment_id",
+      "aliases": ["machine_id", "equipment_id", "asset_id", "line_id"],
+      "required": true,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "event_time",
+      "aliases": ["event_time", "timestamp", "time", "created_on"],
+      "required": true,
+      "data_type": "datetime",
+      "transform_rule": "to_datetime_utc"
+    },
+    {
+      "canonical_name": "parameter_name",
+      "aliases": ["parameter_name", "tag_name", "metric_name", "signal_name"],
+      "required": true,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "parameter_value",
+      "aliases": ["parameter_value", "value", "reading", "metric_value"],
+      "required": true,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "unit",
+      "aliases": ["unit", "uom"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "status",
+      "aliases": ["status", "machine_state", "state"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "upper_text"
+    },
+    {
+      "canonical_name": "alarm_code",
+      "aliases": ["alarm_code", "fault_code", "error_code"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "downtime_hours",
+      "aliases": ["downtime", "downtime_hours", "stop_duration"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "failure_type",
+      "aliases": ["failure_type", "fault_type", "event_type"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    }
+  ]
+}

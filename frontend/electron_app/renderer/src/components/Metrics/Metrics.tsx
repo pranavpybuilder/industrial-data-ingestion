@@ -1,8 +1,6 @@
 import React from "react";
 import { runUI } from "../../state/run_ui_store";
-import { insightsUI } from "../../state/insights_ui_store";
-import { dashboardsUI } from "../../state/dashboards_ui_store";
-import { exportsUI } from "../../state/exports_ui_store";
+import { frontendApi } from "../../services/frontendApi";
 
 const ACCENT_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444"];
 
@@ -12,19 +10,67 @@ export function Metrics() {
     runUI.getSnapshot
   );
 
-  const activeRun = runState.activeRunId ?? "—";
+  const activeRun = runState.activeRunId ?? "N/A";
+  const [insightsCount, setInsightsCount] = React.useState(0);
+  const [dashboardsCount, setDashboardsCount] = React.useState(0);
+  const [exportsCount, setExportsCount] = React.useState(0);
+
+  React.useEffect(() => {
+    const runId = runState.activeRunId;
+    if (!runId) {
+      setInsightsCount(0);
+      setDashboardsCount(0);
+      setExportsCount(0);
+      return;
+    }
+
+    const load = async () => {
+      const [insights, dashboards, exportsRes] = await Promise.all([
+        frontendApi.getInsights(runId),
+        frontendApi.getDashboard(runId),
+        frontendApi.getExports(runId),
+      ]);
+
+      setInsightsCount(
+        insights.success && Array.isArray(insights.data) ? insights.data.length : 0
+      );
+      setDashboardsCount(
+        dashboards.success && dashboards.data?.dashboard_state ? 1 : 0
+      );
+      setExportsCount(
+        exportsRes.success && Array.isArray(exportsRes.data) ? exportsRes.data.length : 0
+      );
+    };
+
+    load();
+  }, [runState.activeRunId]);
 
   return (
     <div style={grid}>
-      <MetricCard title="Active Run" value={activeRun} mono accentColor={ACCENT_COLORS[0]} />
-      <MetricCard title="Insights" value="0" accentColor={ACCENT_COLORS[1]} />
-      <MetricCard title="Dashboards" value="0" accentColor={ACCENT_COLORS[2]} />
-      <MetricCard title="Exports" value="0" accentColor={ACCENT_COLORS[3]} />
+      <MetricCard
+        title="Active Run"
+        value={activeRun}
+        mono
+        accentColor={ACCENT_COLORS[0]}
+      />
+      <MetricCard
+        title="Insights"
+        value={String(insightsCount)}
+        accentColor={ACCENT_COLORS[1]}
+      />
+      <MetricCard
+        title="Dashboards"
+        value={String(dashboardsCount)}
+        accentColor={ACCENT_COLORS[2]}
+      />
+      <MetricCard
+        title="Exports"
+        value={String(exportsCount)}
+        accentColor={ACCENT_COLORS[3]}
+      />
     </div>
   );
 }
-
-/* ------------------ Reusable Card ------------------ */
 
 function MetricCard({
   title,
@@ -54,15 +100,13 @@ function MetricCard({
           ...valueStyle,
           fontFamily: mono ? "monospace" : "inherit",
         }}
-        title={value} // tooltip fallback
+        title={value}
       >
         {value}
       </div>
     </div>
   );
 }
-
-/* ------------------ Styles ------------------ */
 
 const grid: React.CSSProperties = {
   display: "grid",
@@ -92,8 +136,6 @@ const valueStyle: React.CSSProperties = {
   fontSize: 24,
   fontWeight: 700,
   color: "#111827",
-
-  /* 🔒 CRITICAL FIX */
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",

@@ -5,9 +5,10 @@
  * This enum mirrors backend-defined semantics.
  */
 export type RunStatus =
+  | "PENDING"
+  | "RUNNING"
   | "SUCCESS"
-  | "FAILED"
-  | "PARTIAL";
+  | "FAILED";
 
 /**
  * RunSourceType

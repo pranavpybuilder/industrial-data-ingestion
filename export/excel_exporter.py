@@ -9,6 +9,8 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
+from utils.paths import EXPORT_DIR
+
 
 class ExcelExporter:
     """
@@ -29,7 +31,7 @@ class ExcelExporter:
         self,
         run_id: str,
         unified_insights: List[Dict[str, Any]],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export unified insights to Excel workbook.
@@ -59,7 +61,7 @@ class ExcelExporter:
         self,
         run_id: str,
         profiling_results: Dict[str, Any],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export profiling results to Excel workbook.
@@ -90,7 +92,7 @@ class ExcelExporter:
         run_id: str,
         unified_insights: List[Dict[str, Any]],
         profiling_results: Optional[Dict[str, Any]] = None,
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export complete report with insights, profiling, and summary.

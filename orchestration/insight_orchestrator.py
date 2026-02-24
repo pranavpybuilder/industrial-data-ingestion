@@ -1,4 +1,4 @@
-﻿"""
+"""
 Insight Orchestrator - Module 5
 Merges Rule Findings (Module 3) + ML Findings (Module 4)
 Produces unified insights for Module 6 Dashboard and Module 7 Export
@@ -22,7 +22,7 @@ class InsightOrchestrator:
     5. Generate unified insights table
     """
     
-    SEVERITY_ORDER = {"CRITICAL": 3, "WARNING": 2, "INFO": 1}
+    SEVERITY_ORDER = {"CRITICAL": 4, "WARNING": 3, "MEDIUM": 2, "INFO": 1}
     
     def __init__(self, logger=None):
         """Initialize orchestrator"""
@@ -64,15 +64,22 @@ class InsightOrchestrator:
             normalized_ml = self._normalize_ml_findings(ml_findings)
             equipment_insights = self._extract_equipment_insights(equipment_intelligence)
             
-            self.logger.info(f"      [OK] {len(normalized_rules)} rule findings normalized")
-            self.logger.info(f"      [OK] {len(normalized_ml)} ML findings normalized")
-            self.logger.info(f"      [OK] {len(equipment_insights)} equipment insights extracted")
-            self.logger.info(f"      [OK] {len(normalized_ml)} ML findings normalized")
+            self.logger.info(
+                f"      [ok] {len(normalized_rules)} rule findings normalized"
+            )
+            self.logger.info(
+                f"      [ok] {len(normalized_ml)} ML findings normalized"
+            )
+            self.logger.info(
+                f"      [ok] {len(equipment_insights)} equipment insights extracted"
+            )
             
             # STEP 2: Build resource index
             self.logger.info("\n[2/5] Building resource index...")
             resource_index = self._build_resource_index(normalized_rules, normalized_ml)
-            self.logger.info(f"      [OK] {len(resource_index)} unique resources identified")
+            self.logger.info(
+                f"      [ok] {len(resource_index)} unique resources identified"
+            )
             
             # STEP 3: Merge findings by resource
             self.logger.info("\n[3/5] Merging findings by resource...")
@@ -81,12 +88,14 @@ class InsightOrchestrator:
                 normalized_ml, 
                 resource_index
             )
-            self.logger.info(f"      [OK] {len(merged_insights)} merged insights created")
+            self.logger.info(
+                f"      [ok] {len(merged_insights)} merged insights created"
+            )
             
             # STEP 4: Apply business logic
             self.logger.info("\n[4/5] Applying orchestration logic...")
             merged_insights = self._apply_orchestration_logic(merged_insights)
-            self.logger.info(f"      [OK] Orchestration logic applied")
+            self.logger.info("      [ok] Orchestration logic applied")
             
             # STEP 5: Format for output
             self.logger.info("\n[5/5] Formatting for output...")
@@ -95,7 +104,9 @@ class InsightOrchestrator:
             # Add equipment analysis insights
             final_insights.extend(self._format_insights(run_id, equipment_insights))
             
-            self.logger.info(f"      [OK] {len(final_insights)} insights formatted")
+            self.logger.info(
+                f"      [ok] {len(final_insights)} insights formatted"
+            )
             
             self.logger.info("\n" + "=" * 80)
             self.logger.info(f"Orchestration Complete")
@@ -110,7 +121,7 @@ class InsightOrchestrator:
         
         except Exception as e:
             self.logger.error(f"CRITICAL orchestration error: {e}", exc_info=True)
-            return []
+            raise
     
     
     def _normalize_rule_findings(self, rule_findings: List[Dict]) -> List[Dict]:
@@ -123,7 +134,9 @@ class InsightOrchestrator:
                 "rule_name": finding.get("rule_name", "Unknown"),
                 "rule_id": finding.get("rule_id", ""),
                 "triggered": finding.get("triggered", False),
-                "severity": finding.get("severity", "INFO"),
+                "severity": self._normalize_severity(
+                    finding.get("severity", "INFO")
+                ),
                 "confidence": finding.get("confidence", 0.5),
                 "affected_columns": finding.get("affected_columns", []),
                 "affected_resource": self._extract_primary_resource(
@@ -150,7 +163,9 @@ class InsightOrchestrator:
                 "finding_type": finding_type,  # ANOMALY, PATTERN, FORECAST
                 "feature_name": finding.get("feature_name", ""),
                 "affected_resource": finding.get("feature_name", ""),
-                "severity": finding.get("severity", "INFO"),
+                "severity": self._normalize_severity(
+                    finding.get("severity", "INFO")
+                ),
                 "confidence": finding.get("confidence", 0.5),
                 "anomaly_score": finding.get("anomaly_score", 0.0),
                 "ml_method": finding.get("detection_method", "Unknown"),
@@ -272,18 +287,21 @@ class InsightOrchestrator:
     
     def _escalate_severity(self, severities: List[str]) -> str:
         """Escalate severity when multiple findings present"""
+        normalized = [self._normalize_severity(s) for s in severities]
         max_severity = max(
-            [self.SEVERITY_ORDER.get(s, 0) for s in severities if s in self.SEVERITY_ORDER],
+            [self.SEVERITY_ORDER.get(s, 0) for s in normalized if s in self.SEVERITY_ORDER],
             default=0
         )
         
         # If any CRITICAL or if we have both WARNING and INFO, escalate
         if max_severity >= self.SEVERITY_ORDER["CRITICAL"]:
             return "CRITICAL"
-        elif max_severity >= self.SEVERITY_ORDER["WARNING"] and len(severities) > 1:
+        elif max_severity >= self.SEVERITY_ORDER["WARNING"] and len(normalized) > 1:
             return "CRITICAL"  # Agreement escalates to CRITICAL
         elif max_severity >= self.SEVERITY_ORDER["WARNING"]:
             return "WARNING"
+        elif max_severity >= self.SEVERITY_ORDER["MEDIUM"]:
+            return "MEDIUM"
         else:
             return "INFO"
     
@@ -303,7 +321,9 @@ class InsightOrchestrator:
         
         # Sort by severity (CRITICAL > WARNING > INFO)
         def severity_key(finding):
-            severity = finding.get("severity", "INFO")
+            severity = self._normalize_severity(
+                finding.get("severity", "INFO")
+            )
             return self.SEVERITY_ORDER.get(severity, 0)
         
         merged.sort(key=severity_key, reverse=True)
@@ -367,7 +387,25 @@ class InsightOrchestrator:
             finding_type = finding.get("finding_type", "Anomaly")
             return f"{severity}: ML {finding_type} on {resource}"
         else:  # MERGED
-            return f"{severity}: Rule + ML Agreement on {resource}"    
+            return f"{severity}: Rule + ML Agreement on {resource}"
+
+    def _normalize_severity(self, severity: Optional[str]) -> str:
+        if not severity:
+            return "INFO"
+
+        normalized = str(severity).strip().upper()
+        mapping = {
+            "CRIT": "CRITICAL",
+            "HIGH": "CRITICAL",
+            "WARN": "WARNING",
+            "NORMAL": "INFO",
+            "LOW": "INFO",
+        }
+        normalized = mapping.get(normalized, normalized)
+
+        if normalized not in self.SEVERITY_ORDER:
+            return "INFO"
+        return normalized
     
     def _extract_equipment_insights(self, equipment_intelligence: Dict) -> List[Dict]:
         """Extract high-value insights from equipment analysis"""

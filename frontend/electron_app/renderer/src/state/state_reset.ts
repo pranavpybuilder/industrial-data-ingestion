@@ -2,50 +2,41 @@
 
 import { runUI } from "./run_ui_store";
 import { dashboardsUI } from "./dashboards_ui_store";
+import { insightsUI } from "./insights_ui_store";
+import { ingestionUI } from "./ingestion_ui_store";
+import { clearDashboardForRun } from "../services/dashboardPersistenceService";
 
 /**
  * Centralized handler for run changes.
  * This is the ONLY place where cross-state side effects are allowed.
  */
 export function onRunChange(runId: string) {
-  if (!runId || runId.trim() === "") {
+  const previousRunId = runUI.getSnapshot().activeRunId;
+  const normalizedRunId = (runId || "").trim();
+
+  if (previousRunId) {
+    clearDashboardForRun(previousRunId);
+  }
+  resetRunScopedState();
+
+  if (!normalizedRunId) {
     runUI.clearRun();
   } else {
-    runUI.setActiveRun(runId);
+    runUI.setActiveRun(normalizedRunId);
   }
+}
 
-  // ---------- SET ACTIVE RUN ----------
-  runUI.setActiveRun(runId);
+export function clearActiveRunContext() {
+  const previousRunId = runUI.getSnapshot().activeRunId;
+  if (previousRunId) {
+    clearDashboardForRun(previousRunId);
+  }
+  resetRunScopedState();
+  runUI.clearRun();
+}
 
-  // ---------- RESET DASHBOARD STATE ----------
+function resetRunScopedState() {
   dashboardsUI.reset();
-
-  // ---------- INITIALIZE DASHBOARD FOR THIS RUN ----------
-  dashboardsUI.initialize(
-    {
-      dashboardId: `dashboard_${runId}`,
-      title: "Maintenance Overview",
-      widgets: [
-        {
-          widgetId: "downtime_trend",
-          widgetType: "chart",
-          allowedVisualTypes: ["line", "bar"],
-        },
-        {
-          widgetId: "mttr_metric",
-          widgetType: "metric",
-        },
-        {
-          widgetId: "equipment_map",
-          widgetType: "map",
-        },
-        {
-          widgetId: "analysis_note",
-          widgetType: "text",
-        },
-      ],
-    },
-    1
-  );
-  console.log(`[State Reset] Run changed to: ${runId || "none"}`);
+  insightsUI.reset();
+  ingestionUI.reset();
 }

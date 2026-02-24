@@ -1,59 +1,56 @@
-# app/pipeline_runner.py
-
 """
-Pipeline Runner – End-to-end orchestrator for Modules 1-5: Ingestion → Profiling → Rules → ML → Orchestration
+Strict end-to-end pipeline orchestration.
 
-Flow:
-    1. Create a new analytical run
-    2. Ingest the uploaded file (validate, persist parquet)
-    3. Save ingestion metadata to DuckDB
-    4. Populate feature store (long-format) from ingested data
-    5. Profile data (Module 2)
-    6. Run ML analysis (Module 4) - PERMANENT & REQUIRED
-    7. Apply rules (Module 3)
-    8. Orchestrate insights (Module 5) - Merge rule + ML findings
-    9. Update run status
-
-Returns unified insights with source tracking (RULE, ML, or MERGED)
-
-This is called by main.py and the IPC layer.
-Fully offline. No network calls.
+Pipeline order:
+1. Create run
+2. Ingest file
+3. Save ingestion metadata
+4. Populate feature store
+5. Profile data
+6. Equipment analysis
+7. Rule engine
+8. ML engine
+9. Insight orchestration
+10. Persist insights
+11. Generate and persist dashboard blueprint
+12. Generate and persist exports
+13. Mark run successful
 """
 
 import uuid
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from storage.connection import initialize_database
-from storage.repositories.run_repo import RunRepository, RunStatus
-from storage.repositories.ingestion_repo import IngestionRepository
-from storage.repositories.feature_store_repo import FeatureStoreRepository
-from storage.repositories.profiling_repo import ProfilingRepository
-from storage.repositories.insight_repo import InsightRepository
-from ingestion.upload_handler import handle_file_upload
+from dashboard_engine.blueprint_generator import BlueprintGenerator
+from ingestion.upload_handler import detect_source_type, handle_file_upload
+from ingestion.versioning.run_id import generate_run_id
+from ml_engine import MLEngine
+from orchestration.executive_narrative import ExecutiveNarrativeComposer
+from orchestration.insight_orchestrator import InsightOrchestrator
+from orchestration.prioritization import InsightPrioritizer
+from orchestration.severity_scoring import SeverityScorer
 from profiling.column_classifier import ColumnClassifier
-from profiling.data_profiler import DataProfiler
 from profiling.data_health import compute_data_health
+from profiling.data_profiler import DataProfiler
 from profiling.equipment_analyzer import EquipmentAnalyzer
-from rule_engine.threshold_engine import ThresholdEngine
+from rule_engine.explainability import RuleExplainer
 from rule_engine.maintenance_rules import (
-    PMOverdueRule,
     FailurePatternRule,
+    PMOverdueRule,
     TemperatureUptrendRule,
     VibrationSpikeRule,
 )
-from rule_engine.explainability import RuleExplainer
-from ml_engine import MLEngine
-from orchestration.insight_orchestrator import InsightOrchestrator
-from orchestration.severity_scoring import SeverityScorer
-from orchestration.prioritization import InsightPrioritizer
-from dashboard_engine.blueprint_generator import BlueprintGenerator
+from rule_engine.threshold_engine import ThresholdEngine
+from storage.connection import initialize_database
 from storage.repositories.dashboard_repo import DashboardRepository
-from export.excel_exporter import ExcelExporter
-from export.pdf_exporter import PDFExporter
-from export.csv_exporter import CSVExporter
+from storage.repositories.export_repo import ExportRepository
+from storage.repositories.feature_store_repo import FeatureStoreRepository
+from storage.repositories.ingestion_repo import IngestionRepository
+from storage.repositories.insight_repo import InsightRepository
+from storage.repositories.profiling_repo import ProfilingRepository
+from storage.repositories.run_repo import RunRepository, RunStatus
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -64,20 +61,13 @@ feature_store_repo = FeatureStoreRepository()
 profiling_repo = ProfilingRepository()
 insight_repo = InsightRepository()
 dashboard_repo = DashboardRepository()
+export_repo = ExportRepository()
 
 
 class PipelineRunner:
-    """
-    Orchestrates the full ingestion pipeline for one or more files.
-    """
-
     def __init__(self) -> None:
         initialize_database()
         logger.info("Pipeline runner initialized. Database ready.")
-
-    # ──────────────────────────────────────────────
-    # Public API
-    # ──────────────────────────────────────────────
 
     def run_single_file(
         self,
@@ -85,314 +75,281 @@ class PipelineRunner:
         source_type: Optional[str] = None,
         run_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Ingest a single file through the full pipeline.
+        current_step = "resolve_source"
+        run_id: Optional[str] = None
 
-        Parameters
-        ----------
-        file_path : str
-            Absolute path to the file
-        source_type : str, optional
-            sap / plc / rfid / report_excel / operational_excel
-        run_name : str, optional
-            Human-readable run name
-
-        Returns
-        -------
-        dict with success, run_id, ingestion metadata, feature count
-        """
-
-        # ── Step 1: Ingest file ──
-        ingestion_result = handle_file_upload(
-            file_path=file_path,
-            source_type=source_type,
-        )
-
-        if not ingestion_result.get("success"):
-            return {
-                "success": False,
-                "error": ingestion_result.get("error"),
-            }
-
-        run_id = ingestion_result["run_id"]
-        resolved_source = ingestion_result["source"]
-        file_name = ingestion_result.get("file_name", Path(file_path).name)
-
-        if run_name is None:
-            run_name = f"{resolved_source}_{file_name}"
-
-        # ── Step 2: Create run in DB ──
         try:
+            resolved_source = (
+                source_type
+                or detect_source_type(file_path)
+                or "generic_tabular"
+            )
+            resolved_source = resolved_source.lower().strip()
+
+            file_name = Path(file_path).name
+            run_id = generate_run_id()
+            run_name = run_name or f"{resolved_source}_{file_name}"
+
+            current_step = "create_run"
             run_repo.create_run(
                 run_id=run_id,
                 run_name=run_name,
                 source_type=resolved_source,
-                status=RunStatus.PROCESSING,
+                status=RunStatus.PENDING,
             )
-            logger.info(f"Run created: {run_id}")
-        except Exception as exc:
-            logger.error(f"Failed to create run: {exc}")
-            return {"success": False, "error": str(exc)}
+            run_repo.update_status(run_id, RunStatus.RUNNING)
 
-        # ── Step 3: Save ingestion metadata to DB ──
-        try:
+            current_step = "ingest_file"
+            ingestion_result = handle_file_upload(
+                file_path=file_path,
+                source_type=resolved_source,
+                run_id=run_id,
+            )
+            if not ingestion_result.get("success"):
+                raise RuntimeError(
+                    ingestion_result.get("error", "Ingestion failed")
+                )
+
+            output_path = ingestion_result.get("output_path")
+            if not output_path:
+                raise RuntimeError("Ingestion output_path is missing")
+
+            current_step = "persist_ingestion"
             file_id = str(uuid.uuid4())[:12]
+            current_schema_hash = ingestion_result.get("schema_hash")
+            current_schema_type = ingestion_result.get("source_schema_type")
+            previous_schema_hash = ingestion_repo.get_latest_schema_hash_for_source(
+                source_type=resolved_source,
+                source_schema_type=current_schema_type,
+            )
+            schema_drift_detected = bool(
+                previous_schema_hash
+                and current_schema_hash
+                and previous_schema_hash != current_schema_hash
+            )
+
             ingestion_repo.save_ingested_file(
                 file_id=file_id,
                 run_id=run_id,
-                file_name=file_name,
+                file_name=ingestion_result.get("file_name", file_name),
                 source_type=resolved_source,
-                schema_hash=ingestion_result.get("schema_hash"),
-                row_count=ingestion_result.get("rows", 0),
+                source_schema_type=current_schema_type,
+                schema_version=ingestion_result.get("schema_version"),
+                schema_hash=current_schema_hash,
+                schema_drift_detected=schema_drift_detected,
+                original_column_snapshot=ingestion_result.get(
+                    "original_column_snapshot", []
+                ),
+                normalized_column_snapshot=ingestion_result.get(
+                    "normalized_column_snapshot", []
+                ),
+                column_mapping=ingestion_result.get("column_mapping", {}),
+                mapping_decisions=ingestion_result.get("mapping_decisions", []),
+                unmapped_source_columns=ingestion_result.get(
+                    "unmapped_source_columns", []
+                ),
+                row_count=int(ingestion_result.get("rows", 0)),
+                output_path=output_path,
             )
-            logger.info(
-                f"Ingestion metadata saved: {file_name}, "
-                f"{ingestion_result['rows']} rows"
-            )
-        except Exception as exc:
-            logger.error(f"Failed to save ingestion metadata: {exc}")
-            run_repo.update_status(run_id, RunStatus.FAILED)
-            return {"success": False, "error": str(exc)}
 
-        # ── Step 4: Populate feature store ──
-        feature_count = 0
-        try:
+            current_step = "feature_store"
             feature_count = self._populate_features(
                 run_id=run_id,
                 source_type=resolved_source,
-                output_path=ingestion_result.get("output_path"),
+                output_path=output_path,
             )
-            logger.info(
-                f"Feature store populated: {feature_count} features"
-            )
-        except Exception as exc:
-            # Feature store population is best-effort for Module 1
-            logger.warning(
-                f"Feature store population failed (non-fatal): {exc}"
-            )
+            if feature_count <= 0:
+                raise RuntimeError("No features were generated for this run")
 
-        # ── Step 5: Run profiling (Module 2) ──
-        profiling_result = None
-        health_score = 0
-        try:
+            current_step = "profiling"
             profiling_result = self._profile_data(
                 run_id=run_id,
-                output_path=ingestion_result.get("output_path"),
+                output_path=output_path,
             )
-            if profiling_result and profiling_result.get("success"):
-                health_score = profiling_result.get("health_score", 0)
-                logger.info(
-                    f"Profiling complete: health_score={health_score:.1f}, "
-                    f"{len(profiling_result.get('profiles', []))} columns profiled"
+            if not profiling_result.get("success"):
+                raise RuntimeError(
+                    profiling_result.get("error", "Profiling failed")
                 )
-            else:
-                logger.warning(
-                    f"Profiling returned no results or failed"
-                )
-        except Exception as exc:
-            # Profiling is best-effort, don't fail the run
-            logger.warning(
-                f"Profiling failed (non-fatal): {exc}"
-            )
 
-        # ── Step 5.5: Equipment Analysis (Module 2.5 - Business Intelligence) ──
-        equipment_intelligence = {}
-        try:
-            output_path = ingestion_result.get("output_path")
-            if output_path:
-                df = pd.read_parquet(output_path)
-                
-                equipment_analyzer = EquipmentAnalyzer(logger=logger)
-                equipment_intelligence = equipment_analyzer.analyze(df)
-                
-                logger.info(
-                    f"Equipment analysis complete: "
-                    f"{equipment_intelligence.get('equipment_frequency', {}).get('total_equipment', 0)} equipment, "
-                    f"{equipment_intelligence.get('equipment_frequency', {}).get('total_breakdowns', 0)} breakdowns"
-                )
-        except Exception as exc:
-            # Equipment analysis is best-effort
-            logger.warning(
-                f"Equipment analysis failed (non-fatal): {exc}"
-            )
+            current_step = "equipment_analysis"
+            equipment_intelligence = self._run_equipment_analysis(output_path)
 
-        # ── Step 6: Run ML Engine (Module 4) ──
-        ml_findings = []
-        try:
-            ml_findings = self._run_ml_analysis(
-                run_id=run_id,
-                output_path=ingestion_result.get("output_path"),
-                source_type=resolved_source,
-            )
-            logger.info(
-                f"ML analysis complete: {len(ml_findings)} ML findings generated"
-            )
-        except Exception as exc:
-            # ML is best-effort, don't fail the run
-            logger.warning(
-                f"ML analysis failed (non-fatal): {exc}"
-            )
-
-        # ── Step 7: Apply rules (Module 3) ──
-        rule_findings = []
-        triggered_rules = 0
-        try:
+            current_step = "rule_engine"
             rule_findings = self._apply_rules(
                 run_id=run_id,
-                output_path=ingestion_result.get("output_path"),
-                profiles=profiling_result.get("profiles", {}) if profiling_result else {},
+                output_path=output_path,
+                profiles=profiling_result.get("profiles", {}),
                 source_type=resolved_source,
             )
-            triggered_rules = len([r for r in rule_findings if r.get("triggered")])
-            logger.info(
-                f"Rules applied: {len(rule_findings)} rules checked, "
-                f"{triggered_rules} findings triggered"
-            )
-        except Exception as exc:
-            # Rules are best-effort, don't fail the run
-            logger.warning(
-                f"Rule engine failed (non-fatal): {exc}"
+
+            current_step = "ml_engine"
+            ml_findings = self._run_ml_analysis(
+                run_id=run_id,
+                output_path=output_path,
+                source_type=resolved_source,
             )
 
-        # ── Step 8: Orchestrate insights (Module 5) ──
-        unified_insights = []
-        try:
+            current_step = "orchestration"
             orchestrator = InsightOrchestrator(logger=logger)
-            
             unified_insights = orchestrator.orchestrate(
                 run_id=run_id,
                 rule_findings=rule_findings,
                 ml_findings=ml_findings,
-                profiling_results=profiling_result if profiling_result else None,
-                equipment_intelligence=equipment_intelligence if equipment_intelligence else None,
+                profiling_results=profiling_result.get("profiles", {}),
+                equipment_intelligence=equipment_intelligence,
             )
-            
-            # Apply severity scoring
+
             scorer = SeverityScorer(logger=logger)
             unified_insights = scorer.score_insights(unified_insights)
-            
-            # Apply prioritization
             prioritizer = InsightPrioritizer(logger=logger)
             unified_insights = prioritizer.prioritize(unified_insights)
-            
-            logger.info(
-                f"Orchestration complete: {len(unified_insights)} unified insights"
-            )
-        except Exception as exc:
-            # Orchestration is best-effort
-            logger.warning(
-                f"Insight orchestration failed (non-fatal): {exc}"
-            )
 
-        # ── Step 8.5: Save insights to repository ──
-        try:
+            if not unified_insights:
+                unified_insights = [
+                    {
+                        "insight_id": str(uuid.uuid4())[:12],
+                        "run_id": run_id,
+                        "source": "SYSTEM",
+                        "severity": "INFO",
+                        "resource": "SYSTEM",
+                        "title": "No anomalies detected",
+                        "description": "Pipeline completed with no rule or ML alerts.",
+                        "remediation": "No action required.",
+                        "priority_score": 0.2,
+                        "priority_rank": 1,
+                        "priority_tier": "LOW",
+                        "needs_action": False,
+                        "action_type": "MONITOR",
+                    }
+                ]
+
+            current_step = "executive_narrative"
+            narrative_composer = ExecutiveNarrativeComposer()
+            narrative_payload = narrative_composer.compose(
+                run_id=run_id,
+                source_type=resolved_source,
+                raw_df=pd.read_parquet(output_path),
+                unified_insights=unified_insights,
+                rule_findings=rule_findings,
+                ml_findings=ml_findings,
+                profiling_result=profiling_result,
+            )
+            narrative_insight = narrative_composer.build_narrative_insight(
+                run_id=run_id,
+                narrative=narrative_payload,
+            )
+            unified_insights.append(narrative_insight)
+            unified_insights = sorted(
+                unified_insights,
+                key=lambda insight: float(insight.get("priority_score", 0.0)),
+                reverse=True,
+            )
+            for rank, insight in enumerate(unified_insights, start=1):
+                insight["priority_rank"] = rank
+
+            current_step = "persist_insights"
             insight_repo.save_insights(run_id=run_id, insights=unified_insights)
-            logger.info(f"Insights saved to repository: {len(unified_insights)} insights")
-        except Exception as exc:
-            logger.warning(f"Failed to save insights to repository (non-fatal): {exc}")
 
-        # ── Step 9: Generate dashboard blueprint (Module 6) ──
-        dashboard_blueprint = None
-        try:
+            current_step = "dashboard_blueprint"
             blueprint_generator = BlueprintGenerator(logger=logger)
             dashboard_blueprint = blueprint_generator.generate(
                 run_id=run_id,
                 unified_insights=unified_insights,
-                profiling_results=profiling_result if profiling_result else None,
+                profiling_results=profiling_result.get("profiles", {}),
             )
+            if not blueprint_generator.validate_blueprint(dashboard_blueprint):
+                raise RuntimeError("Generated dashboard blueprint is invalid")
+
             dashboard_repo.save_dashboard_blueprint(
                 run_id=run_id,
                 blueprint=blueprint_generator.to_dict(dashboard_blueprint),
             )
-            logger.info(
-                f"Dashboard blueprint generated: {len(dashboard_blueprint.sections)} sections"
+
+            current_step = "exports"
+            export_files = self._generate_exports(
+                run_id=run_id,
+                unified_insights=unified_insights,
+                profiling_results=profiling_result,
             )
+            self._persist_exports(run_id, export_files)
+
+            current_step = "mark_success"
+            run_repo.update_status(run_id, RunStatus.SUCCESS)
+
+            return {
+                "success": True,
+                "run_id": run_id,
+                "file_name": ingestion_result.get("file_name", file_name),
+                "source_type": resolved_source,
+                "rows": int(ingestion_result.get("rows", 0)),
+                "schema_hash": ingestion_result.get("schema_hash"),
+                "schema_version": ingestion_result.get("schema_version"),
+                "source_schema_type": ingestion_result.get("source_schema_type"),
+                "schema_drift_detected": schema_drift_detected,
+                "column_mapping": ingestion_result.get("column_mapping", {}),
+                "columns": ingestion_result.get("columns", []),
+                "feature_count": feature_count,
+                "health_score": profiling_result.get("health_score", 0),
+                "rule_findings_count": len(rule_findings),
+                "ml_findings_count": len(ml_findings),
+                "unified_insights_count": len(unified_insights),
+                "unified_insights": unified_insights,
+                "executive_narrative": narrative_payload,
+                "dashboard_blueprint": blueprint_generator.to_dict(dashboard_blueprint),
+                "export_files": export_files,
+                "output_path": output_path,
+            }
+
         except Exception as exc:
-            # Dashboard generation is best-effort
-            logger.warning(
-                f"Dashboard generation failed (non-fatal): {exc}"
-            )
+            if run_id:
+                try:
+                    run_repo.mark_failed(
+                        run_id=run_id,
+                        error_message=str(exc),
+                        failed_step=current_step,
+                    )
+                except Exception as status_exc:
+                    logger.error(
+                        "Failed to mark run %s as FAILED: %s",
+                        run_id,
+                        status_exc,
+                    )
 
-        # ── Step 11: Generate exports (Module 7) ──
-        export_files = {}
-        try:
-            # Excel export
-            excel_exporter = ExcelExporter(logger=logger)
-            excel_report = excel_exporter.export_full_report(
-                run_id=run_id,
-                unified_insights=unified_insights,
-                profiling_results=profiling_result if profiling_result else None,
+            logger.error(
+                "Pipeline failed at step '%s' for file '%s': %s",
+                current_step,
+                file_path,
+                exc,
+                exc_info=True,
             )
-            export_files["excel_report"] = excel_report
-            
-            # PDF export
-            pdf_exporter = PDFExporter(logger=logger)
-            pdf_report = pdf_exporter.export_comprehensive_report(
-                run_id=run_id,
-                unified_insights=unified_insights,
-                profiling_results=profiling_result if profiling_result else None,
-            )
-            export_files["pdf_report"] = pdf_report
-            
-            # CSV export (batch)
-            csv_exporter = CSVExporter(logger=logger)
-            csv_files = csv_exporter.export_batch(
-                run_id=run_id,
-                unified_insights=unified_insights,
-                profiling_results=profiling_result if profiling_result else None,
-            )
-            export_files.update(csv_files)
-            
-            logger.info(f"Exports generated: {len(export_files)} files")
-        except Exception as exc:
-            # Exports are best-effort
-            logger.warning(
-                f"Export generation failed (non-fatal): {exc}"
-            )
-
-        # ── Step 12: Mark run as successful ──
-        run_repo.update_status(run_id, RunStatus.SUCCESS)
-        logger.info(f"Pipeline complete for run {run_id}")
-
-        return {
-            "success": True,
-            "run_id": run_id,
-            "file_name": file_name,
-            "source_type": resolved_source,
-            "rows": ingestion_result.get("rows", 0),
-            "schema_hash": ingestion_result.get("schema_hash"),
-            "columns": ingestion_result.get("columns", []),
-            "feature_count": feature_count,
-            "health_score": health_score,
-            "ml_findings_count": len(ml_findings),
-            "triggered_rules": triggered_rules,
-            "unified_insights_count": len(unified_insights),
-            "unified_insights": unified_insights,
-            "dashboard_blueprint": dashboard_blueprint.to_dict() if dashboard_blueprint else None,
-            "export_files": export_files,
-            "output_path": ingestion_result.get("output_path"),
-        }
+            return {
+                "success": False,
+                "run_id": run_id,
+                "failed_step": current_step,
+                "error": str(exc),
+            }
 
     def run_multiple_files(
         self,
         file_paths: List[str],
         source_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Ingest multiple files sequentially.
-        """
-        results = []
-        errors = []
+        results: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
 
         for fp in file_paths:
-            result = self.run_single_file(
-                file_path=fp,
-                source_type=source_type,
-            )
+            result = self.run_single_file(file_path=fp, source_type=source_type)
             if result.get("success"):
                 results.append(result)
             else:
-                errors.append({"file": fp, "error": result.get("error")})
+                errors.append(
+                    {
+                        "file": fp,
+                        "run_id": result.get("run_id"),
+                        "failed_step": result.get("failed_step"),
+                        "error": result.get("error"),
+                    }
+                )
 
         return {
             "success": len(errors) == 0,
@@ -403,380 +360,619 @@ class PipelineRunner:
             "errors": errors,
         }
 
-    # ──────────────────────────────────────────────
-    # Feature store population
-    # ──────────────────────────────────────────────
-
     def _populate_features(
         self,
         run_id: str,
         source_type: str,
-        output_path: Optional[str],
+        output_path: str,
     ) -> int:
-        """
-        Read ingested parquet and convert to long-format features
-        for the feature_store table.
-
-        Returns the number of feature records saved.
-        """
-        if output_path is None:
-            logger.warning("No output path for feature population. Skipping.")
-            return 0
-
         parquet_path = Path(output_path)
         if not parquet_path.exists():
-            logger.warning(f"Parquet file not found: {parquet_path}")
-            return 0
+            raise FileNotFoundError(f"Parquet file not found: {parquet_path}")
 
         df = pd.read_parquet(parquet_path)
-
         if df.empty:
+            raise ValueError("Ingested parquet is empty")
+
+        features = self._extract_source_features(df, source_type)
+        if not features:
             return 0
 
-        # Convert wide-format DataFrame to long-format feature records
-        features = self._dataframe_to_long_features(df, source_type)
-
-        if features:
-            feature_store_repo.delete_features_for_run(run_id)
-            feature_store_repo.save_features(run_id, features)
-
+        feature_store_repo.delete_features_for_run(run_id)
+        feature_store_repo.save_features(run_id, features)
         return len(features)
 
-    @staticmethod
-    def _dataframe_to_long_features(
+    def _extract_source_features(
+        self,
         df: pd.DataFrame,
         source_type: str,
-    ) -> List[Dict]:
-        """
-        Convert a wide-format DataFrame into long-format feature records.
+    ) -> List[Dict[str, Any]]:
+        normalized_source = str(source_type or "").strip().lower()
 
-        Each numeric column becomes a feature record.
-        Each datetime column is used as a timestamp anchor.
-        """
-        features: List[Dict] = []
+        if normalized_source in {"sap", "report_excel"}:
+            features = self._extract_sap_features(df)
+        elif normalized_source == "energy":
+            features = self._extract_energy_features(df)
+        elif normalized_source == "rfid":
+            features = self._extract_rfid_features(df)
+        elif normalized_source == "plc":
+            features = self._extract_plc_features(df)
+        else:
+            features = self._extract_generic_features(df, prefix=normalized_source or "generic")
 
-        # Identify timestamp column (best-effort)
-        timestamp_col = None
-        for candidate in ["event_time", "start_date", "report_date", "date",
-                          "order_start_time", "aligned_time"]:
-            if candidate in df.columns:
-                timestamp_col = candidate
-                break
+        if features:
+            return features
 
-        # Identify numeric columns for feature extraction
-        numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+        # Loud fallback path for unexpectedly sparse schemas.
+        fallback = self._extract_generic_features(df, prefix="generic")
+        if fallback:
+            logger.warning(
+                "Source-specific feature extraction produced no rows for '%s'. "
+                "Using generic numeric feature extraction.",
+                source_type,
+            )
+        return fallback
 
-        for _, row in df.iterrows():
-            ts = None
-            if timestamp_col and pd.notna(row.get(timestamp_col)):
-                ts_val = row[timestamp_col]
-                ts = str(ts_val) if not isinstance(ts_val, str) else ts_val
+    @staticmethod
+    def _extract_sap_features(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        features: List[Dict[str, Any]] = []
+        if df.empty:
+            return features
 
-            for col in numeric_cols:
-                val = row.get(col)
-                if pd.notna(val):
-                    features.append({
-                        "feature_name": f"{source_type}__{col}",
-                        "feature_value": float(val),
-                        "feature_type": "numeric",
-                        "timestamp": ts,
-                    })
+        timestamps = PipelineRunner._resolve_timestamps(df)
+        breakdown = pd.to_numeric(
+            df.get("breakdown_count", pd.Series([1] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(1.0)
+        downtime = pd.to_numeric(
+            df.get("downtime_hours", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+
+        feature_frame = pd.DataFrame(
+            {
+                "ts": timestamps,
+                "breakdown_count": breakdown,
+                "downtime_hours": downtime,
+            }
+        )
+
+        for row in feature_frame.itertuples(index=False):
+            ts = PipelineRunner._as_timestamp(row.ts)
+            PipelineRunner._append_feature(
+                features, "sap__breakdown_count", row.breakdown_count, ts
+            )
+            PipelineRunner._append_feature(
+                features, "sap__downtime_hours", row.downtime_hours, ts
+            )
+
+        daily = (
+            feature_frame.dropna(subset=["ts"])
+            .set_index("ts")
+            .resample("D")
+            .sum(numeric_only=True)
+        )
+        for ts, row in daily.iterrows():
+            iso_ts = PipelineRunner._as_timestamp(ts)
+            PipelineRunner._append_feature(
+                features,
+                "sap_daily__breakdown_count",
+                row.get("breakdown_count", 0.0),
+                iso_ts,
+            )
+            PipelineRunner._append_feature(
+                features,
+                "sap_daily__downtime_hours",
+                row.get("downtime_hours", 0.0),
+                iso_ts,
+            )
 
         return features
+
+    @staticmethod
+    def _extract_energy_features(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        features: List[Dict[str, Any]] = []
+        if df.empty:
+            return features
+
+        timestamps = PipelineRunner._resolve_timestamps(df)
+        energy = pd.to_numeric(
+            df.get("energy_kwh", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        production = pd.to_numeric(
+            df.get("production_units", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        cost = pd.to_numeric(
+            df.get("energy_cost", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+        intensity = energy / production.replace(0, pd.NA)
+        intensity = intensity.replace([float("inf"), float("-inf")], pd.NA).fillna(0.0)
+
+        for ts, kwh, units, value_cost, metric_intensity in zip(
+            timestamps,
+            energy,
+            production,
+            cost,
+            intensity,
+        ):
+            iso_ts = PipelineRunner._as_timestamp(ts)
+            PipelineRunner._append_feature(features, "energy__kwh", kwh, iso_ts)
+            PipelineRunner._append_feature(
+                features, "energy__production_units", units, iso_ts
+            )
+            PipelineRunner._append_feature(features, "energy__cost", value_cost, iso_ts)
+            PipelineRunner._append_feature(
+                features, "energy__kwh_per_unit", metric_intensity, iso_ts
+            )
+
+        return features
+
+    @staticmethod
+    def _extract_rfid_features(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        features: List[Dict[str, Any]] = []
+        if df.empty:
+            return features
+
+        timestamps = PipelineRunner._resolve_timestamps(df)
+        signal_strength = pd.to_numeric(
+            df.get("signal_strength", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+
+        for ts, strength in zip(timestamps, signal_strength):
+            iso_ts = PipelineRunner._as_timestamp(ts)
+            PipelineRunner._append_feature(features, "rfid__event_count", 1.0, iso_ts)
+            PipelineRunner._append_feature(
+                features, "rfid__signal_strength", strength, iso_ts
+            )
+
+        hourly = (
+            pd.DataFrame({"ts": timestamps, "event_count": 1})
+            .dropna(subset=["ts"])
+            .set_index("ts")
+            .resample("H")
+            .sum(numeric_only=True)
+        )
+        for ts, row in hourly.iterrows():
+            PipelineRunner._append_feature(
+                features,
+                "rfid_hourly__event_count",
+                row.get("event_count", 0.0),
+                PipelineRunner._as_timestamp(ts),
+            )
+
+        return features
+
+    @staticmethod
+    def _extract_plc_features(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        features: List[Dict[str, Any]] = []
+        if df.empty:
+            return features
+
+        timestamps = PipelineRunner._resolve_timestamps(df)
+        parameter_name = (
+            df.get(
+                "parameter_name",
+                pd.Series(["unknown"] * len(df), index=df.index),
+            )
+            .astype("string")
+            .fillna("unknown")
+            .str.strip()
+            .str.lower()
+            .str.replace(r"[^a-z0-9_]+", "_", regex=True)
+            .replace("", "unknown")
+        )
+        parameter_value = pd.to_numeric(
+            df.get("parameter_value", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+
+        for ts, pname, pvalue in zip(timestamps, parameter_name, parameter_value):
+            iso_ts = PipelineRunner._as_timestamp(ts)
+            PipelineRunner._append_feature(
+                features,
+                f"plc__{pname}_value",
+                pvalue,
+                iso_ts,
+            )
+
+        return features
+
+    @staticmethod
+    def _extract_generic_features(
+        df: pd.DataFrame,
+        prefix: str,
+    ) -> List[Dict[str, Any]]:
+        features: List[Dict[str, Any]] = []
+        if df.empty:
+            return features
+
+        timestamps = PipelineRunner._resolve_timestamps(df)
+        numeric_cols = sorted(df.select_dtypes(include=["number"]).columns.tolist())
+
+        for index, row in df.reset_index(drop=True).iterrows():
+            ts = PipelineRunner._as_timestamp(timestamps.iloc[index])
+            for column in numeric_cols:
+                PipelineRunner._append_feature(
+                    features,
+                    f"{prefix}__{column}",
+                    row.get(column),
+                    ts,
+                )
+
+        return features
+
+    @staticmethod
+    def _resolve_timestamps(df: pd.DataFrame) -> pd.Series:
+        for candidate in [
+            "event_time",
+            "start_date",
+            "report_date",
+            "date",
+            "created_on",
+            "timestamp",
+            "aligned_time",
+        ]:
+            if candidate not in df.columns:
+                continue
+            return pd.to_datetime(df[candidate], errors="coerce", utc=True)
+
+        return pd.Series([pd.NaT] * len(df), index=df.index)
+
+    @staticmethod
+    def _as_timestamp(value: Any) -> Optional[str]:
+        if pd.isna(value):
+            return None
+        parsed = pd.to_datetime(value, errors="coerce", utc=True)
+        if pd.isna(parsed):
+            return None
+        return parsed.isoformat()
+
+    @staticmethod
+    def _append_feature(
+        target: List[Dict[str, Any]],
+        feature_name: str,
+        value: Any,
+        timestamp: Optional[str],
+        feature_type: str = "numeric",
+    ) -> None:
+        numeric = pd.to_numeric(value, errors="coerce")
+        if pd.isna(numeric):
+            return
+        target.append(
+            {
+                "feature_name": feature_name,
+                "feature_value": float(numeric),
+                "feature_type": feature_type,
+                "timestamp": timestamp,
+            }
+        )
 
     def _profile_data(
         self,
         run_id: str,
-        output_path: Optional[str],
+        output_path: str,
     ) -> Dict[str, Any]:
-        """
-        Profile ingested data using Module 2: Profiling Layer
-        
-        Performs:
-        1. Column classification (6 types: numeric, categorical, temporal, etc.)
-        2. Statistical profiling (20+ metrics per column)
-        3. Health scoring (5 dimensions: completeness, consistency, etc.)
-        4. Persists results to profiling_results table
-        
-        Returns summary of profiling results including health_score.
-        """
-        if output_path is None:
-            logger.warning("No output path for profiling. Skipping.")
-            return {"success": False, "error": "No output path"}
-
         parquet_path = Path(output_path)
         if not parquet_path.exists():
-            logger.warning(f"Parquet file not found for profiling: {parquet_path}")
-            return {"success": False, "error": "Parquet file not found"}
+            return {"success": False, "error": f"File not found: {parquet_path}"}
 
-        try:
-            # Read the ingested parquet file
-            df = pd.read_parquet(parquet_path)
+        df = pd.read_parquet(parquet_path)
+        if df.empty:
+            return {"success": False, "error": "DataFrame is empty"}
 
-            if df.empty:
-                logger.warning("DataFrame is empty, skipping profiling")
-                return {"success": False, "error": "Empty DataFrame"}
+        classifier = ColumnClassifier()
+        _ = classifier.classify(df)
 
-            logger.info(f"Profiling data: {df.shape[0]} rows, {df.shape[1]} columns")
+        profiler = DataProfiler()
+        profiles = profiler.profile(df)
 
-            # Step 1: Classify columns
-            classifier = ColumnClassifier()
-            classifications = classifier.classify(df)
-            logger.info(f"Column classification complete: {len(classifications)} columns")
+        health_report = compute_data_health(run_id, df)
+        health_score = float(health_report.get("overall_health_score", 0))
 
-            # Step 2: Profile columns
-            profiler = DataProfiler()
-            profiles = profiler.profile(df)
-            logger.info(f"Data profiling complete: {len(profiles)} column profiles")
+        profile_records = profiler.profile_to_db_format(df, run_id)
+        profiling_repo.save_profiling_results(run_id, profile_records)
 
-            # Step 3: Compute health score
-            health_report = compute_data_health(run_id, df)
-            overall_health = health_report  # Already computed, returns dict
-            health_score = health_report.get("overall_health_score", 0)
-            logger.info(f"Health score computed: {health_score:.1f}/100")
+        return {
+            "success": True,
+            "health_score": health_score,
+            "health_details": health_report,
+            "profiles": profiles,
+            "profile_records_saved": len(profile_records),
+        }
 
-            # Step 4: Convert profiles to database format and persist
-            profile_records = profiler.profile_to_db_format(df, run_id)
-            if profile_records:
-                profiling_repo.save_profiling_results(run_id, profile_records)
-                logger.info(f"Saved {len(profile_records)} profiling results to DB")
+    def _run_equipment_analysis(self, output_path: str) -> Dict[str, Any]:
+        df = pd.read_parquet(output_path)
+        if df.empty:
+            raise ValueError("No rows available for equipment analysis")
 
-            return {
-                "success": True,
-                "health_score": health_score,
-                "health_details": overall_health,
-                "profiles": profiles,
-                "profile_records_saved": len(profile_records),
-            }
-
-        except Exception as exc:
-            logger.error(f"Error during profiling: {exc}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(exc),
-            }
+        analyzer = EquipmentAnalyzer(logger=logger)
+        return analyzer.analyze(df)
 
     def _run_ml_analysis(
         self,
         run_id: str,
-        output_path: Optional[str],
+        output_path: str,
         source_type: str,
     ) -> List[Dict[str, Any]]:
-        """
-        Run Module 4: ML Engine for anomaly detection, pattern matching, forecasting.
-        
-        Generates:
-        1. Anomaly scores using Isolation Forest
-        2. Pattern detections (uptrends, spikes, degradation)
-        3. Forecasts with threshold violation alerts
-        4. Quality-validated findings
-        
-        Parameters
-        ----------
-        run_id : str
-            Run ID
-        output_path : str, optional
-            Path to ingested Parquet file for loading data
-        source_type : str
-            Data source type (plc, sap, rfid, etc.)
-        
-        Returns
-        -------
-        list of ML findings as dicts
-        """
-        
-        # Load dataframe from Parquet output
-        df = None
-        if output_path:
-            try:
-                df = pd.read_parquet(output_path)
-            except Exception as exc:
-                logger.warning(f"Could not load data from {output_path}: {exc}")
-        
-        if df is None or df.empty:
-            logger.warning("No data available for ML analysis. Skipping.")
+        raw_df = pd.read_parquet(output_path)
+        features_df = feature_store_repo.get_features_for_run(run_id)
+
+        if features_df is None or features_df.empty:
+            raise ValueError("No features available for ML analysis")
+
+        engine = MLEngine(logger=logger)
+        findings = engine.execute(
+            features_df=features_df,
+            source_type=source_type,
+            run_id=run_id,
+            raw_df=raw_df,
+        )
+
+        if findings is None:
             return []
-        
-        try:
-            # Load feature store for ML analysis
-            features_list = feature_store_repo.get_features_for_run(run_id)
-            
-            if not features_list:
-                logger.warning("No features in feature store for ML analysis.")
-                return []
-            
-            features_df = pd.DataFrame(features_list)
-            
-            logger.info(f"ML analysis starting with {len(features_df)} features")
-            
-            # Initialize ML engine
-            ml_engine = MLEngine(logger=logger)
-            
-            # Define default safety thresholds (can be enhanced from profiling)
-            thresholds = {
-                "temperature": 90,
-                "pressure": 100,
-                "vibration": 5,
-                "motor_speed": 3000,
-                "flow_rate": 150,
-            }
-            
-            # Execute ML analysis
-            ml_findings = ml_engine.execute(features_df, thresholds)
-            
-            logger.info(f"ML analysis complete: {len(ml_findings)} findings")
-            return ml_findings
-        
-        except Exception as exc:
-            logger.error(f"Error during ML analysis: {exc}", exc_info=True)
-            return []
+        return findings
 
     def _apply_rules(
         self,
         run_id: str,
-        output_path: Optional[str],
+        output_path: str,
         profiles: Dict[str, Any],
         source_type: str,
     ) -> List[Dict[str, Any]]:
-        """
-        Apply Module 3: Rules Engine to generate findings.
-        
-        Evaluates:
-        1. Threshold-based rules (numeric bounds, missing data, outliers)
-        2. Maintenance-specific rules (PM overdue, failure patterns, etc.)
-        
-        Parameters
-        ----------
-        run_id : str
-            Run ID
-        output_path : str, optional
-            Path to ingested Parquet file for loading data
-        profiles : dict
-            Column profiles from Module 2
-        source_type : str
-            Data source (plc, sap, rfid, etc.)
-        
-        Returns
-        -------
-        list of rule findings as dicts
-        """
-        
-        # Load dataframe from Parquet output
-        df = None
-        if output_path:
-            try:
-                df = pd.read_parquet(output_path)
-            except Exception as exc:
-                logger.warning(f"Could not load data from {output_path}: {exc}")
-        
-        if df is None or df.empty:
-            logger.warning("No data available for rules. Skipping.")
-            return []
-        
-        try:
-            # Initialize threshold engine
-            threshold_engine = ThresholdEngine()
-            
-            # Prepare context data
-            total_rows = len(df)
-            context = {
-                "run_id": run_id,
-                "source_type": source_type,
-                "total_rows": total_rows,
-            }
-            
-            # Apply threshold rules
-            threshold_results = []
-            if profiles:
-                logger.info(f"Applying threshold rules to {len(profiles)} columns")
-                
-                # Map source-specific key names from configuration
-                # For PLC: match temperature, pressure, vibration
-                # For SAP: match order dates, failure codes
-                source_configs = {
-                    "plc": {
-                        "temperature": {"min": 0, "max": 90, "critical_max": 100},
-                        "pressure": {"min": 0, "max": 10},
-                        "vibration": {"min": 0, "max": 5},
-                    },
-                    "sap": {},
-                    "rfid": {},
-                    "report_excel": {},
-                    "operational_excel": {},
-                }
-                
-                col_config = source_configs.get(source_type, {})
-                threshold_results = threshold_engine.apply_to_all_profiles(
-                    profiles=profiles,
-                    column_configs=col_config,
-                    total_rows=total_rows,
-                )
-            
-            # Convert RuleResult objects to dicts
-            rule_findings = []
-            for result in threshold_results:
-                rule_findings.append({
+        df = pd.read_parquet(output_path)
+        if df.empty:
+            raise ValueError("No rows available for rule evaluation")
+
+        threshold_engine = ThresholdEngine()
+        total_rows = len(df)
+
+        source_configs: Dict[str, Dict[str, Dict[str, float]]] = {
+            "plc": {
+                "temperature": {"min": 0, "max": 90, "critical_max": 100},
+                "pressure": {"min": 0, "max": 10},
+                "vibration": {"min": 0, "max": 5},
+            },
+            "sap": {},
+            "rfid": {},
+            "energy": {},
+            "report_excel": {},
+            "operational_excel": {},
+            "generic_tabular": {},
+        }
+
+        # Auto-map generic numeric columns for threshold monitoring.
+        if source_type == "generic_tabular":
+            for column_name, profile in profiles.items():
+                if profile.get("detected_type") != "numeric":
+                    continue
+                col = column_name.lower()
+                if "temperature" in col:
+                    source_configs["generic_tabular"][column_name] = {"max": 90}
+                elif "pressure" in col:
+                    source_configs["generic_tabular"][column_name] = {"max": 10}
+                elif "vibration" in col:
+                    source_configs["generic_tabular"][column_name] = {"max": 5}
+                elif "downtime" in col:
+                    source_configs["generic_tabular"][column_name] = {"max": 240}
+
+        threshold_results = threshold_engine.apply_to_all_profiles(
+            profiles=profiles,
+            column_configs=source_configs.get(source_type, {}),
+            total_rows=total_rows,
+        )
+
+        rule_findings: List[Dict[str, Any]] = []
+        for result in threshold_results:
+            rule_findings.append(
+                {
                     "rule_name": result.rule_name,
                     "rule_id": result.rule_id,
                     "triggered": result.triggered,
-                    "severity": result.severity,
-                    "confidence": result.confidence,
+                    "severity": str(result.severity).upper(),
+                    "confidence": float(result.confidence),
                     "message": result.message,
                     "remediation": result.remediation,
                     "affected_columns": result.affected_columns,
-                })
-            
-            # Apply maintenance-specific rules (if applicable)
-            if source_type == "plc":
-                logger.info("Applying PLC-specific maintenance rules")
-                
-                # Temperature uptrend check
-                if "temperature" in profiles:
-                    temp_rule = TemperatureUptrendRule()
-                    result = temp_rule.evaluate({
-                        "profile": profiles,
-                        "total_rows": total_rows,
-                    })
-                    if result.triggered:
-                        rule_findings.append({
-                            "rule_name": result.rule_name,
-                            "rule_id": result.rule_id,
-                            "triggered": result.triggered,
-                            "severity": result.severity,
-                            "confidence": result.confidence,
-                            "message": result.message,
-                            "remediation": result.remediation,
-                            "affected_columns": result.affected_columns,
-                        })
-                
-                # Vibration spike check
-                if "vibration" in profiles:
-                    vib_rule = VibrationSpikeRule()
-                    result = vib_rule.evaluate({
-                        "profile": profiles,
-                        "total_rows": total_rows,
-                    })
-                    if result.triggered:
-                        rule_findings.append({
-                            "rule_name": result.rule_name,
-                            "rule_id": result.rule_id,
-                            "triggered": result.triggered,
-                            "severity": result.severity,
-                            "confidence": result.confidence,
-                            "message": result.message,
-                            "remediation": result.remediation,
-                            "affected_columns": result.affected_columns,
-                        })
-            
-            elif source_type == "sap":
-                logger.info("Applying SAP-specific maintenance rules")
-                # PM overdue check would go here
-                # Requires PM order data in features
-            
-            logger.info(f"Rules applied: {len(rule_findings)} findings")
-            return rule_findings
-        
-        except Exception as exc:
-            logger.error(f"Error applying rules: {exc}", exc_info=True)
-            return []
+                }
+            )
 
+        # Source-aware maintenance heuristics.
+        context = {"profile": profiles, "total_rows": total_rows}
+        if "temperature" in profiles:
+            result = TemperatureUptrendRule().evaluate(context)
+            rule_findings.append(
+                {
+                    "rule_name": result.rule_name,
+                    "rule_id": result.rule_id,
+                    "triggered": result.triggered,
+                    "severity": str(result.severity).upper(),
+                    "confidence": float(result.confidence),
+                    "message": result.message,
+                    "remediation": result.remediation,
+                    "affected_columns": result.affected_columns,
+                }
+            )
+
+        if "vibration" in profiles:
+            result = VibrationSpikeRule().evaluate(context)
+            rule_findings.append(
+                {
+                    "rule_name": result.rule_name,
+                    "rule_id": result.rule_id,
+                    "triggered": result.triggered,
+                    "severity": str(result.severity).upper(),
+                    "confidence": float(result.confidence),
+                    "message": result.message,
+                    "remediation": result.remediation,
+                    "affected_columns": result.affected_columns,
+                }
+            )
+
+        # SAP-oriented rules can still run opportunistically when features exist.
+        feature_records = feature_store_repo.get_features_for_run(run_id)
+        feature_context = {"features": feature_records.to_dict("records")}
+        if source_type == "sap":
+            for rule in (PMOverdueRule(), FailurePatternRule()):
+                result = rule.evaluate(feature_context)
+                rule_findings.append(
+                    {
+                        "rule_name": result.rule_name,
+                        "rule_id": result.rule_id,
+                        "triggered": result.triggered,
+                        "severity": str(result.severity).upper(),
+                        "confidence": float(result.confidence),
+                        "message": result.message,
+                        "remediation": result.remediation,
+                        "affected_columns": result.affected_columns,
+                    }
+                )
+
+        # Attach explainability for triggered findings.
+        explainer = RuleExplainer()
+        for finding in rule_findings:
+            if not finding.get("triggered"):
+                continue
+            explanation = explainer.explain_result(
+                type(
+                    "_RuleLike",
+                    (),
+                    {
+                        "rule_name": finding["rule_name"],
+                        "severity": finding["severity"].lower(),
+                        "triggered": finding["triggered"],
+                        "confidence": finding["confidence"],
+                        "message": finding["message"],
+                        "remediation": finding["remediation"],
+                        "affected_columns": finding["affected_columns"],
+                        "data": {},
+                    },
+                )()
+            )
+            finding["explanation"] = explanation
+
+        return rule_findings
+
+    def _generate_exports(
+        self,
+        run_id: str,
+        unified_insights: List[Dict[str, Any]],
+        profiling_results: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        try:
+            from export.csv_exporter import CSVExporter
+            from export.excel_exporter import ExcelExporter
+            from export.pdf_exporter import PDFExporter
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                f"Missing export dependency: {exc.name}. "
+                "Install project requirements before running exports."
+            ) from exc
+
+        export_files: Dict[str, Any] = {}
+        export_profiling_payload = self._build_export_profiling_payload(
+            profiling_results
+        )
+
+        excel_exporter = ExcelExporter(logger=logger)
+        export_files["excel_report"] = excel_exporter.export_full_report(
+            run_id=run_id,
+            unified_insights=unified_insights,
+            profiling_results=export_profiling_payload,
+        )
+
+        pdf_exporter = PDFExporter(logger=logger)
+        export_files["pdf_report"] = pdf_exporter.export_comprehensive_report(
+            run_id=run_id,
+            unified_insights=unified_insights,
+            profiling_results=export_profiling_payload,
+        )
+
+        csv_exporter = CSVExporter(logger=logger)
+        export_files["csv_files"] = csv_exporter.export_batch(
+            run_id=run_id,
+            unified_insights=unified_insights,
+            profiling_results=export_profiling_payload,
+        )
+
+        return export_files
+
+    def _persist_exports(self, run_id: str, export_files: Dict[str, Any]) -> None:
+        def _save(path: str, export_type: str, scope: str) -> None:
+            export_repo.save_export(
+                export_id=str(uuid.uuid4())[:12],
+                run_id=run_id,
+                export_type=export_type,
+                scope=scope,
+                file_path=path,
+            )
+
+        for key, value in export_files.items():
+            if isinstance(value, dict):
+                for nested_key, nested_value in value.items():
+                    if nested_value:
+                        _save(str(nested_value), nested_key, key)
+                continue
+
+            if value:
+                _save(str(value), key, key)
+
+    @staticmethod
+    def _build_export_profiling_payload(
+        profiling_results: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if not profiling_results:
+            return None
+
+        profiles = profiling_results.get("profiles", {})
+        if not isinstance(profiles, dict):
+            profiles = {}
+
+        columns: Dict[str, Dict[str, Any]] = {}
+        for column_name, profile in profiles.items():
+            if not isinstance(profile, dict):
+                continue
+
+            null_pct = float(profile.get("null_percentage", 0.0))
+            columns[column_name] = {
+                "type": profile.get("detected_type", "unknown"),
+                "non_null_percentage": max(0.0, 100.0 - null_pct),
+                "unique_values": int(profile.get("unique_count", 0)),
+                "missing_count": int(profile.get("null_count", 0)),
+                "missing_percentage": null_pct,
+                "mean": profile.get("mean"),
+                "median": profile.get("median"),
+                "std_dev": profile.get("std"),
+                "min": profile.get("min"),
+                "max": profile.get("max"),
+                "distinct_count": int(profile.get("unique_count", 0)),
+            }
+
+        health_details = profiling_results.get("health_details", {})
+        quality_issues = health_details.get("column_issues", [])
+        formatted_issues = []
+        for issue in quality_issues:
+            if not isinstance(issue, dict):
+                continue
+            formatted_issues.append(
+                {
+                    "column": issue.get("column_name", ""),
+                    "issue_type": issue.get("message", ""),
+                    "severity": issue.get("severity", ""),
+                    "details": issue.get("message", ""),
+                }
+            )
+
+        return {
+            "columns": columns,
+            "quality_metrics": {
+                "health_score": float(profiling_results.get("health_score", 0.0)),
+                "total_missing": int(
+                    sum(int(v.get("missing_count", 0)) for v in columns.values())
+                ),
+                "issues": formatted_issues,
+            },
+        }

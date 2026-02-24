@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS runs (
     run_name TEXT NOT NULL,
     source_type TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status TEXT NOT NULL
+    status TEXT NOT NULL,
+    error_message TEXT,
+    failed_step TEXT
 );
 
 -- =====================================================
@@ -19,8 +21,17 @@ CREATE TABLE IF NOT EXISTS ingested_files (
     run_id TEXT NOT NULL,
     file_name TEXT NOT NULL,
     source_type TEXT NOT NULL,
+    source_schema_type TEXT,
+    schema_version TEXT,
     schema_hash TEXT,
+    schema_drift_detected BOOLEAN DEFAULT FALSE,
+    original_column_snapshot JSON,
+    normalized_column_snapshot JSON,
+    column_mapping JSON,
+    mapping_decisions JSON,
+    unmapped_source_columns JSON,
     row_count INTEGER,
+    output_path TEXT,
     ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -67,6 +78,17 @@ CREATE TABLE IF NOT EXISTS dashboards (
     run_id TEXT NOT NULL,
     dashboard_state JSON NOT NULL,
     saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
+-- USER SAVED DASHBOARD LAYOUTS
+-- =====================================================
+CREATE TABLE IF NOT EXISTS dashboard_layout (
+    layout_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    blueprint_id TEXT,
+    user_saved_layout JSON NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =====================================================

@@ -88,68 +88,104 @@ class EquipmentAnalyzer:
         return insights
     
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize column names to standard format"""
+        """Normalize column names to standard format."""
         df = df.copy()
-        
-        column_map = {
-            "Equipment ID": "equipment_id",
-            "Equipment": "equipment_id",
-            "Equipment_ID": "equipment_id",
-            "Breakdown Count": "breakdown_count",
-            "Breakdown_Count": "breakdown_count",
-            "Count": "breakdown_count",
-            "Downtime": "downtime_hours",
-            "Downtime (hrs)": "downtime_hours",
-            "Duration": "downtime_hours",
-            "Failure Type": "failure_type",
-            "Failure_Type": "failure_type",
-            "Type": "failure_type",
-            "Root Cause": "root_cause",
-            "Root_Cause": "root_cause",
-            "Cause": "root_cause",
-            "Technician": "technician",
-            "Technician ID": "technician",
-            "Tech": "technician",
-            "Spare Part": "spare_part",
-            "Spare_Part": "spare_part",
-            "Part Replaced": "spare_part",
-            "Part": "spare_part",
-            "Severity": "severity",
-            "5-Why": "five_why_depth",
-            "5_Why": "five_why_depth",
+
+        # Normalize all incoming column labels first.
+        normalized_cols = {
+            c: str(c).strip().lower().replace(" ", "_").replace("/", "_")
+            for c in df.columns
         }
-        
+        df.rename(columns=normalized_cols, inplace=True)
+
+        # Canonical aliases for known fields.
+        column_map = {
+            "equipment": "equipment_id",
+            "equipment_id": "equipment_id",
+            "equipment_number": "equipment_id",
+            "machine_id": "equipment_id",
+            "machine_name": "equipment_id",
+            "asset_id": "equipment_id",
+            "breakdown_count": "breakdown_count",
+            "count": "breakdown_count",
+            "downtime": "downtime_hours",
+            "downtime_(hrs)": "downtime_hours",
+            "duration": "downtime_hours",
+            "downtime_hours": "downtime_hours",
+            "failure_type": "failure_type",
+            "type": "failure_type",
+            "root_cause": "root_cause",
+            "cause": "root_cause",
+            "technician": "technician",
+            "technician_id": "technician",
+            "tech": "technician",
+            "spare_part": "spare_part",
+            "part_replaced": "spare_part",
+            "part": "spare_part",
+            "severity": "severity",
+            "5-why": "five_why_depth",
+            "5_why": "five_why_depth",
+            "why5": "five_why_depth",
+        }
+
         for old_col, new_col in column_map.items():
-            if old_col in df.columns:
+            if old_col in df.columns and old_col != new_col:
+                if new_col in df.columns:
+                    continue
                 df.rename(columns={old_col: new_col}, inplace=True)
-        
+
+        # If a per-event breakdown count is absent, default each row to one event.
+        if "breakdown_count" not in df.columns:
+            df["breakdown_count"] = 1
+
         return df
     
     def _analyze_equipment_frequency(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze breakdown frequency per equipment"""
-        
-        # Get breakdown counts (by count column or by grouped records)
-        if "breakdown_count" in df.columns:
-            freq_data = df.groupby("equipment_id")["breakdown_count"].sum().sort_values(ascending=False)
+
+        if df.empty:
+            return {
+                "total_breakdowns": 0,
+                "total_equipment": 0,
+                "top_failing_equipment": [],
+                "frequency_distribution": {},
+            }
+
+        equipment_col = "equipment_id" if "equipment_id" in df.columns else None
+
+        if equipment_col:
+            freq_data = (
+                df.groupby(equipment_col)["breakdown_count"]
+                .sum()
+                .sort_values(ascending=False)
+            )
         else:
-            # Group by equipment_id and count records
-            freq_data = df.groupby("equipment_id").size().sort_values(ascending=False)
-        
-        total_breakdowns = freq_data.sum()
-        unique_equipment = len(freq_data)
-        
-        # Top equipment
+            # Fallback for datasets without explicit equipment identity.
+            freq_data = pd.Series(
+                data=[float(df["breakdown_count"].sum())],
+                index=["SYSTEM"],
+                dtype="float64",
+            )
+
+        total_breakdowns = float(freq_data.sum())
+        unique_equipment = int(len(freq_data))
         top_3 = freq_data.head(3)
-        
+
         return {
             "total_breakdowns": int(total_breakdowns),
-            "total_equipment": int(unique_equipment),
+            "total_equipment": unique_equipment,
             "top_failing_equipment": [
                 {
                     "equipment_id": str(eq_id),
                     "breakdown_count": int(count),
-                    "percentage": round(count / total_breakdowns * 100, 1),
-                    "risk_level": self._get_risk_level_frequency(count, total_breakdowns),
+                    "percentage": (
+                        round(float(count) / total_breakdowns * 100, 1)
+                        if total_breakdowns > 0
+                        else 0.0
+                    ),
+                    "risk_level": self._get_risk_level_frequency(
+                        float(count), total_breakdowns
+                    ),
                 }
                 for eq_id, count in top_3.items()
             ],
@@ -160,15 +196,31 @@ class EquipmentAnalyzer:
     
     def _analyze_downtime(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze downtime statistics"""
-        
+
         if "downtime_hours" not in df.columns:
-            return {"total_downtime": 0, "average_downtime": 0}
+            return {
+                "total_downtime_hours": 0.0,
+                "average_downtime_hours": 0.0,
+                "max_downtime_hours": 0.0,
+                "min_downtime_hours": 0.0,
+                "extreme_events_count": 0,
+                "extreme_threshold_hours": 12,
+                "equipment_downtime": {},
+            }
         
         downtime_col = pd.to_numeric(df["downtime_hours"], errors='coerce')
         downtime_col = downtime_col.dropna()
         
         if len(downtime_col) == 0:
-            return {"total_downtime": 0, "average_downtime": 0}
+            return {
+                "total_downtime_hours": 0.0,
+                "average_downtime_hours": 0.0,
+                "max_downtime_hours": 0.0,
+                "min_downtime_hours": 0.0,
+                "extreme_events_count": 0,
+                "extreme_threshold_hours": 12,
+                "equipment_downtime": {},
+            }
         
         total_downtime = downtime_col.sum()
         avg_downtime = downtime_col.mean()

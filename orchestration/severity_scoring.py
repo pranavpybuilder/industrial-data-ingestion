@@ -17,7 +17,7 @@ class SeverityScorer:
     4. Business impact
     """
     
-    SEVERITY_BASE = {"CRITICAL": 100, "WARNING": 50, "INFO": 20}
+    SEVERITY_BASE = {"CRITICAL": 100, "WARNING": 65, "MEDIUM": 45, "INFO": 20}
     RESOURCE_CRITICALITY = {
         "TEMPERATURE": 0.9,
         "MOTOR": 0.95,
@@ -44,7 +44,8 @@ class SeverityScorer:
         
         for insight in insights:
             # Calculate base score from severity
-            severity = insight.get("severity", "INFO")
+            severity = self._normalize_severity(insight.get("severity", "INFO"))
+            insight["severity"] = severity
             base_score = self.SEVERITY_BASE.get(severity, 20)
             
             # Factor in confidence (rule + ML)
@@ -84,8 +85,12 @@ class SeverityScorer:
     
     def get_top_insights(self, insights: List[Dict], top_n: int = 10) -> List[Dict]:
         """Get top N insights by priority"""
-        scored = sorted(insights, key=lambda x: x.get("priority_score", 0), reverse=True)
-        return scored[:top_n]
+        sorted_insights = sorted(
+            insights,
+            key=lambda x: x.get("priority_score", 0),
+            reverse=True,
+        )
+        return sorted_insights[:top_n]
     
     
     def categorize_by_severity(self, insights: List[Dict]) -> Dict[str, List[Dict]]:
@@ -93,8 +98,20 @@ class SeverityScorer:
         categories = {"CRITICAL": [], "WARNING": [], "INFO": []}
         
         for insight in insights:
-            severity = insight.get("severity", "INFO")
+            severity = self._normalize_severity(insight.get("severity", "INFO"))
             if severity in categories:
                 categories[severity].append(insight)
-        
+
         return categories
+
+    def _normalize_severity(self, severity: str) -> str:
+        normalized = str(severity).strip().upper()
+        if normalized in self.SEVERITY_BASE:
+            return normalized
+        if normalized in {"HIGH", "CRIT"}:
+            return "CRITICAL"
+        if normalized in {"WARN"}:
+            return "WARNING"
+        if normalized in {"NORMAL", "LOW"}:
+            return "INFO"
+        return "INFO"

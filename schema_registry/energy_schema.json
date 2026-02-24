@@ -1,0 +1,77 @@
+{
+  "source_type": "energy",
+  "schema_version": "1.0.0",
+  "description": "Canonical energy report schema",
+  "canonical_fields": [
+    {
+      "canonical_name": "equipment_id",
+      "aliases": ["equipment_id", "machine_name", "equipment", "asset_id", "line_name", "meter_id"],
+      "required": true,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "event_time",
+      "aliases": ["date", "report_date", "timestamp", "created_on", "event_time"],
+      "required": true,
+      "data_type": "datetime",
+      "transform_rule": "to_datetime_utc"
+    },
+    {
+      "canonical_name": "energy_kwh",
+      "aliases": ["daily_consumption", "energy_kwh", "power_kwh", "consumption_kwh", "energy_usage", "kwh"],
+      "required": true,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "production_units",
+      "aliases": ["products", "production_qty", "production_units", "output_qty", "units"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "energy_cost",
+      "aliases": ["cost", "power_cost", "energy_cost", "cost_usd", "daily_cost"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "tariff_rate",
+      "aliases": ["tariff", "tariff_rate", "price_per_kwh"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "downtime_hours",
+      "aliases": ["downtime", "downtime_hours", "outage_hours", "breakdown_dur"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "breakdown_count",
+      "aliases": ["breakdown_count", "failure_count", "breakdown"],
+      "required": false,
+      "data_type": "int",
+      "transform_rule": "to_int"
+    },
+    {
+      "canonical_name": "failure_type",
+      "aliases": ["failure_type", "issue_type", "fault_type"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "root_cause",
+      "aliases": ["root_cause", "cause", "why1", "loss_reason"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    }
+  ]
+}

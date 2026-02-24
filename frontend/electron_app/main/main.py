@@ -106,7 +106,11 @@ class FrontendMainWindow(QMainWindow):
 
 
 def main() -> None:
-    initialize_database()
+    try:
+        initialize_database()
+    except ModuleNotFoundError as exc:
+        print(str(exc))
+        raise SystemExit(1) from exc
 
     app = QApplication(sys.argv)
     window = FrontendMainWindow()

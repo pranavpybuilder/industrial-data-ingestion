@@ -1,8 +1,8 @@
 /**
  * Auto Dashboard Service
  * ----------------------
- * SAFE MODE
- * Generates widgets purely from schema
+ * Builds a dashboard shell from schema metadata only.
+ * This service does not fabricate chart values.
  */
 
 export interface DatasetSchema {
@@ -19,7 +19,8 @@ export interface AutoWidget {
 
 export function generateAutoDashboard(
   schema: DatasetSchema,
-  runId: string
+  runId: string,
+  widgetDataInput: Record<string, Array<{ x: string; y: number }>> = {}
 ) {
   const widgets: AutoWidget[] = schema.numeric.map((metric) => ({
     widgetId: `${metric}_trend`,
@@ -33,12 +34,7 @@ export function generateAutoDashboard(
   > = {};
 
   widgets.forEach((w) => {
-    widgetData[w.widgetId] = [
-      { x: "Jan", y: 30 },
-      { x: "Feb", y: 45 },
-      { x: "Mar", y: 25 },
-      { x: "Apr", y: 60 },
-    ];
+    widgetData[w.widgetId] = widgetDataInput[w.widgetId] || [];
   });
 
   return {

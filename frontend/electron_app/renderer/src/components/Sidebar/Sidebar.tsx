@@ -1,5 +1,5 @@
-import { NavLink } from "react-router-dom";
-import { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useState, useSyncExternalStore } from "react";
 import {
   FiHome,
   FiUpload,
@@ -11,6 +11,7 @@ import {
   FiMenu,
   FiChevronLeft,
 } from "react-icons/fi";
+import { runUI } from "../../state/run_ui_store";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -22,19 +23,27 @@ interface NavItemProps {
   icon: React.ReactNode;
   label: string;
   collapsed: boolean;
+  disabled?: boolean;
+  fallbackTo?: string;
 }
 
-const NavItem = ({ to, icon, label, collapsed }: NavItemProps) => {
+const NavItem = ({ to, icon, label, collapsed, disabled = false, fallbackTo = "/ingestion" }: NavItemProps) => {
   const [hovered, setHovered] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <NavLink
       to={to}
       end={to === "/"}
-      title={label}
+      title={disabled ? "No active run selected. Go to Ingestion." : label}
       aria-label={label}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={(event) => {
+        if (!disabled) return;
+        event.preventDefault();
+        navigate(fallbackTo);
+      }}
       style={({ isActive }) => ({
         display: "flex",
         alignItems: "center",
@@ -46,7 +55,7 @@ const NavItem = ({ to, icon, label, collapsed }: NavItemProps) => {
         textDecoration: "none",
         fontSize: "14px",
         fontWeight: isActive ? 600 : 450,
-        color: isActive ? "#ffffff" : "#c7d2fe",
+        color: disabled ? "rgba(199, 210, 254, 0.45)" : isActive ? "#ffffff" : "#c7d2fe",
         background: isActive
           ? "rgba(99, 102, 241, 0.25)"
           : hovered
@@ -59,6 +68,8 @@ const NavItem = ({ to, icon, label, collapsed }: NavItemProps) => {
         transform: hovered && !isActive ? "translateX(2px)" : "none",
         whiteSpace: "nowrap" as const,
         overflow: "hidden",
+        opacity: disabled ? 0.6 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
       })}
     >
       <span style={{ fontSize: "17px", flexShrink: 0, display: "flex" }}>
@@ -70,6 +81,9 @@ const NavItem = ({ to, icon, label, collapsed }: NavItemProps) => {
 };
 
 const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
+  const runState = useSyncExternalStore(runUI.subscribe, runUI.getSnapshot);
+  const requiresRunDisabled = !runState.activeRunId;
+
   return (
     <nav
       style={{
@@ -111,9 +125,9 @@ const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
       <div style={{ flex: 1 }}>
         <NavItem to="/" icon={<FiHome />} label="Home" collapsed={collapsed} />
         <NavItem to="/ingestion" icon={<FiUpload />} label="Ingestion" collapsed={collapsed} />
-        <NavItem to="/insights" icon={<FiZap />} label="Insights" collapsed={collapsed} />
-        <NavItem to="/dashboards" icon={<FiGrid />} label="Dashboards" collapsed={collapsed} />
-        <NavItem to="/exports" icon={<FiDownload />} label="Exports" collapsed={collapsed} />
+        <NavItem to="/insights" icon={<FiZap />} label="Insights" collapsed={collapsed} disabled={requiresRunDisabled} />
+        <NavItem to="/dashboards" icon={<FiGrid />} label="Dashboards" collapsed={collapsed} disabled={requiresRunDisabled} />
+        <NavItem to="/exports" icon={<FiDownload />} label="Exports" collapsed={collapsed} disabled={requiresRunDisabled} />
 
         {/* DIVIDER */}
         <div
@@ -140,8 +154,8 @@ const Sidebar = ({ collapsed, onToggle }: SidebarProps) => {
           </div>
         )}
 
-        <NavItem to="/explorer" icon={<FiDatabase />} label="Explorer" collapsed={collapsed} />
-        <NavItem to="/data-health" icon={<FiActivity />} label="Data Health" collapsed={collapsed} />
+        <NavItem to="/explorer" icon={<FiDatabase />} label="Explorer" collapsed={collapsed} disabled={requiresRunDisabled} />
+        <NavItem to="/data-health" icon={<FiActivity />} label="Data Health" collapsed={collapsed} disabled={requiresRunDisabled} />
       </div>
 
       {/* VERSION BADGE */}

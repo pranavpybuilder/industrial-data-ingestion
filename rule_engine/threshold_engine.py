@@ -105,9 +105,13 @@ class MissingDataRule(RuleBase):
         profile = data.get("profile", {})
         if self.column_name not in profile:
             return self._not_triggered_result(self, [])
-        
+
         col_profile = profile[self.column_name]
-        missing_pct = col_profile.get("missing_percentage", 0) / 100.0
+        missing_pct_raw = col_profile.get(
+            "missing_percentage",
+            col_profile.get("null_percentage", 0),
+        )
+        missing_pct = missing_pct_raw / 100.0
         
         if missing_pct > self.critical_threshold:
             severity = "critical"
