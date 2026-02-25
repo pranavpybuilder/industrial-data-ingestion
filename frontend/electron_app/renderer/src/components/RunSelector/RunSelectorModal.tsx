@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import SearchBar from "../SearchBar/SearchBar";
 import { runUI } from "../../state/run_ui_store";
 import { frontendApi } from "../../services/frontendApi";
+import { clearActiveRunContext, onRunChange } from "../../state/state_reset";
 import "./RunSelectorModal.css";
 
 interface RunMeta {
   run_id: string;
+  run_name?: string;
+  source_type?: string;
+  status?: string;
+  created_at?: string;
 }
 
 interface Props {
@@ -13,6 +18,7 @@ interface Props {
 }
 
 const RunSelectorModal = ({ onClose }: Props) => {
+  const runState = useSyncExternalStore(runUI.subscribe, runUI.getSnapshot);
   const [runs, setRuns] = useState<RunMeta[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,15 +40,25 @@ const RunSelectorModal = ({ onClose }: Props) => {
     fetchRuns();
   }, []);
 
-  const filteredRuns = runs.filter((run) => {
-    if (!search.trim()) return true;
-    const searchLower = search.toLowerCase().trim();
-    const runIdLower = run.run_id.toLowerCase();
-    return runIdLower.includes(searchLower);
-  });
+  const filteredRuns = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return runs;
+    return runs.filter((run) => {
+      return (
+        run.run_id.toLowerCase().includes(needle) ||
+        (run.run_name || "").toLowerCase().includes(needle) ||
+        (run.source_type || "").toLowerCase().includes(needle)
+      );
+    });
+  }, [runs, search]);
 
   const handleSelectRun = (runId: string) => {
-    runUI.setActiveRun(runId);
+    onRunChange(runId);
+    onClose();
+  };
+
+  const handleClearRun = () => {
+    clearActiveRunContext();
     onClose();
   };
 
@@ -50,9 +66,9 @@ const RunSelectorModal = ({ onClose }: Props) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-container" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">Select Ingested File</h2>
+          <h2 className="modal-title">Select Ingested Run</h2>
           <button className="close-btn" onClick={onClose} aria-label="Close" title="Close">
-            ×
+            x
           </button>
         </div>
 
@@ -63,6 +79,14 @@ const RunSelectorModal = ({ onClose }: Props) => {
               placeholder="Search run / file..."
               onChange={setSearch}
             />
+            {runState.activeRunId && (
+              <button
+                className="clear-run-btn"
+                onClick={handleClearRun}
+              >
+                Clear Run
+              </button>
+            )}
           </div>
 
           <div className="runs-list-container">
@@ -100,14 +124,28 @@ const RunSelectorModal = ({ onClose }: Props) => {
                 >
                   <div className="run-details">
                     <span className="run-id">{run.run_id}</span>
+                    {(run.run_name || run.source_type || run.status) && (
+                      <span className="run-meta">
+                        {[run.run_name, run.source_type, run.status]
+                          .filter(Boolean)
+                          .join(" | ")}
+                      </span>
+                    )}
                   </div>
-                  <div className="run-arrow">→</div>
+                  <div className="run-arrow">-&gt;</div>
                 </div>
               ))}
           </div>
         </div>
 
         <div className="modal-footer">
+          <div>
+            {runState.activeRunId && (
+              <button className="clear-run-footer-btn" onClick={handleClearRun}>
+                Clear Run
+              </button>
+            )}
+          </div>
           <button className="cancel-btn" onClick={onClose}>
             Cancel
           </button>

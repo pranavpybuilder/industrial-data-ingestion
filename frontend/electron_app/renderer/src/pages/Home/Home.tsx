@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useRunUI } from "../../state/useRunUI";
+import { frontendApi } from "../../services/frontendApi";
 import {
   FiUpload,
   FiZap,
@@ -14,9 +15,46 @@ const Home = () => {
   const navigate = useNavigate();
   const run = useRunUI();
 
-  /* TEMP COUNTS — backend / DB will replace */
-  const totalInsightsAndDashboards = 0;
-  const totalExports = 0;
+  const [insightCount, setInsightCount] = useState(0);
+  const [dashboardCount, setDashboardCount] = useState(0);
+  const [exportCount, setExportCount] = useState(0);
+
+  useEffect(() => {
+    const activeRun = run.activeRunId;
+    if (!activeRun) {
+      setInsightCount(0);
+      setDashboardCount(0);
+      setExportCount(0);
+      return;
+    }
+
+    const loadStats = async () => {
+      const [insightsRes, exportsRes, dashboardRes] = await Promise.all([
+        frontendApi.getInsights(activeRun),
+        frontendApi.getExports(activeRun),
+        frontendApi.getDashboard(activeRun),
+      ]);
+
+      setInsightCount(
+        insightsRes.success && Array.isArray(insightsRes.data)
+          ? insightsRes.data.length
+          : 0
+      );
+      setExportCount(
+        exportsRes.success && Array.isArray(exportsRes.data)
+          ? exportsRes.data.length
+          : 0
+      );
+      setDashboardCount(
+        dashboardRes.success && dashboardRes.data?.dashboard_state ? 1 : 0
+      );
+    };
+
+    loadStats();
+  }, [run.activeRunId]);
+
+  const totalInsightsAndDashboards = insightCount + dashboardCount;
+  const totalExports = exportCount;
 
   return (
     <section style={{ animation: "fadeIn 0.3s ease-out" }}>

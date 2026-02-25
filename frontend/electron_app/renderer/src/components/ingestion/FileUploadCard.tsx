@@ -1,30 +1,54 @@
-import { useState, useRef } from "react";
-import { FiUploadCloud, FiFile } from "react-icons/fi";
+import { useRef, useState } from "react";
+import { FiFile, FiUploadCloud } from "react-icons/fi";
+
+import { frontendApi } from "../../services/frontendApi";
 import { IngestionSource } from "../../pages/Ingestion/Ingestion";
 
 interface Props {
   source: IngestionSource | null;
   onSourceChange: (s: IngestionSource) => void;
-  file: File | null;
-  onFileChange: (f: File) => void;
+  fileName: string | null;
+  onFileSelected: (filePath: string, fileName: string) => void;
 }
 
-const SOURCES: IngestionSource[] = [
-  "SAP",
-  "RFID",
-  "PLC",
-  "EXCEL",
-  "ENERGY",
-];
+const SOURCES: IngestionSource[] = ["SAP", "RFID", "PLC", "EXCEL", "ENERGY"];
 
 const FileUploadCard = ({
   source,
   onSourceChange,
-  file,
-  onFileChange,
+  fileName,
+  onFileSelected,
 }: Props) => {
-  const [hoveredSource, setHoveredSource] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [hoveredSource, setHoveredSource] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+
+  const handleBrowse = async () => {
+    if (!source) return;
+    setSelectionError(null);
+
+    // Desktop mode: use native dialog so backend receives a real absolute path.
+    const picked = await frontendApi.selectFile();
+    if (picked.success && picked.data?.file_path) {
+      onFileSelected(picked.data.file_path, picked.data.file_name);
+      return;
+    }
+
+    // Browser fallback for local UI testing.
+    fileInputRef.current?.click();
+  };
+
+  const onFallbackPicked = (file: File) => {
+    const fallbackPath = (file as any).path || "";
+    if (!fallbackPath) {
+      setSelectionError(
+        "Browser mode does not expose absolute file paths. Run in desktop shell."
+      );
+      return;
+    }
+
+    onFileSelected(fallbackPath, file.name);
+  };
 
   return (
     <div style={styles.card}>
@@ -45,13 +69,10 @@ const FileUploadCard = ({
                 background: isSelected
                   ? "#6366f1"
                   : isHovered
-                  ? "#e0e7ff"
-                  : "#f3f4f6",
+                    ? "#e0e7ff"
+                    : "#f3f4f6",
                 color: isSelected ? "#ffffff" : "#111827",
-                boxShadow: isSelected
-                  ? "0 2px 8px rgba(99,102,241,0.3)"
-                  : "none",
-                transform: isHovered && !isSelected ? "translateY(-1px)" : "none",
+                boxShadow: isSelected ? "0 2px 8px rgba(99,102,241,0.3)" : "none",
               }}
             >
               {s}
@@ -66,37 +87,44 @@ const FileUploadCard = ({
         aria-label="Upload file"
         disabled={!source}
         style={{ display: "none" }}
-        onChange={(e) =>
-          e.target.files && onFileChange(e.target.files[0])
-        }
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onFallbackPicked(file);
+          }
+        }}
       />
 
-      <div
+      <button
+        type="button"
         style={{
           ...styles.dropZone,
           borderColor: !source ? "#d1d5db" : "#6366f1",
           opacity: !source ? 0.5 : 1,
           cursor: !source ? "not-allowed" : "pointer",
         }}
-        onClick={() => source && fileInputRef.current?.click()}
+        disabled={!source}
+        onClick={handleBrowse}
       >
-        {file ? (
+        {fileName ? (
           <div style={styles.fileInfo}>
             <FiFile size={22} color="#6366f1" />
-            <span style={styles.fileName}>{file.name}</span>
+            <span style={styles.fileName}>{fileName}</span>
           </div>
         ) : (
           <div style={styles.dropContent}>
             <FiUploadCloud size={32} color="#6366f1" />
-            <span style={styles.dropText}>
-              Click to browse or drag & drop a file
-            </span>
+            <span style={styles.dropText}>Click to select a data file</span>
             <span style={styles.dropHint}>
-              {source ? `Upload a ${source} file` : "Select a source first"}
+              {source ? `Source: ${source}` : "Select a source first"}
             </span>
           </div>
         )}
-      </div>
+      </button>
+
+      {selectionError && (
+        <p style={styles.error}>{selectionError}</p>
+      )}
     </div>
   );
 };
@@ -135,9 +163,8 @@ const styles: Record<string, React.CSSProperties> = {
     border: "2px dashed #e5e7eb",
     borderRadius: "12px",
     padding: "32px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    width: "100%",
+    background: "#ffffff",
     transition: "all 0.2s ease",
   },
   dropContent: {
@@ -158,12 +185,18 @@ const styles: Record<string, React.CSSProperties> = {
   fileInfo: {
     display: "flex",
     alignItems: "center",
+    justifyContent: "center",
     gap: "10px",
   },
   fileName: {
     fontSize: "14px",
     fontWeight: 500,
     color: "#111827",
+  },
+  error: {
+    color: "#b91c1c",
+    fontSize: "12px",
+    marginTop: "10px",
   },
 };
 

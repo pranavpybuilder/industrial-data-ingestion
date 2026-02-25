@@ -6,15 +6,17 @@
  */
 
 import type { InteractionState } from "./dashboards_ui_store";
+import { frontendApi } from "../services/frontendApi";
 
 export type ExportScope =
   | "insights"
-  | "dashboard"
+  | "dashboards"
   | "both";
 
 export type ExportFormat =
   | "pdf"
-  | "excel";
+  | "excel"
+  | "csv";
 
 export interface ExportRequest {
   runId: string;
@@ -24,23 +26,16 @@ export interface ExportRequest {
 }
 
 class ExportsUIStore {
-  export(request: ExportRequest): Promise<void> {
-    // FRONTEND MOCK (Electron-safe)
-    return new Promise((resolve) => {
-      console.log("EXPORT REQUEST", request);
+  async export(request: ExportRequest): Promise<void> {
+    const response = await frontendApi.generateExport(
+      request.runId,
+      request.format,
+      request.scope
+    );
 
-      // Later:
-      // - Call IPC
-      // - Generate PDF / Excel
-      // - Ask file save location
-
-      setTimeout(() => {
-        alert(
-          `Export successful\n\nRun: ${request.runId}\nScope: ${request.scope}\nFormat: ${request.format}`
-        );
-        resolve();
-      }, 500);
-    });
+    if (!response.success) {
+      throw new Error(response.message || "Export failed");
+    }
   }
 }
 

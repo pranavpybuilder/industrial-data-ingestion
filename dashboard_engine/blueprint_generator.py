@@ -154,20 +154,24 @@ class BlueprintGenerator:
         widgets = []
         
         for col_name, profile in list(profiles.items())[:6]:
-            if isinstance(profile, dict):
-                widget = {
-                    "id": f"quality_{col_name}",
-                    "type": "card",
-                    "title": col_name,
-                    "metrics": {
-                        "completeness": profile.get("completeness", 100),
-                        "type": profile.get("detected_type", "unknown"),
-                        "missing": profile.get("missing_count", 0),
-                        "outliers": profile.get("outlier_count", 0),
-                    },
-                }
-                
-                widgets.append(widget)
+            if not isinstance(profile, dict):
+                continue
+
+            null_pct = float(profile.get("null_percentage", 0))
+            completeness = max(0.0, 100.0 - null_pct)
+            widget = {
+                "id": f"quality_{col_name}",
+                "type": "card",
+                "title": col_name,
+                "metrics": {
+                    "completeness": round(completeness, 2),
+                    "type": profile.get("detected_type", "unknown"),
+                    "missing": int(profile.get("null_count", 0)),
+                    "outliers": int(profile.get("outlier_count", 0)),
+                },
+            }
+
+            widgets.append(widget)
         
         section = {
             "id": f"section_quality_{uuid.uuid4().hex[:8]}",

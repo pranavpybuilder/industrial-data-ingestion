@@ -93,6 +93,26 @@
 
 .search-wrapper {
   margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clear-run-btn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #ef4444;
+  background: #fff1f2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-run-btn:hover {
+  background: #ffe4e6;
 }
 
 .runs-list-container {
@@ -197,6 +217,13 @@
   font-family: monospace;
 }
 
+.run-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .run-arrow {
   color: #9ca3af;
   font-size: 18px;
@@ -213,8 +240,25 @@
   padding: 16px 24px;
   border-top: 1px solid #e5e7eb;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   background: #f9fafb;
+}
+
+.clear-run-footer-btn {
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid #ef4444;
+  background: #fff1f2;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-run-footer-btn:hover {
+  background: #ffe4e6;
 }
 
 .cancel-btn {

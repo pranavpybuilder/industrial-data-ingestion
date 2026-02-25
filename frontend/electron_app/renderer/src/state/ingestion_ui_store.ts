@@ -37,17 +37,18 @@ class IngestionUIStore {
     this.state = {
       status: "uploading",
       selectedFile: fileName,
+      errorMessage: undefined,
     };
     this.emit();
+  }
 
-    /* Simulated backend response */
-    setTimeout(() => {
-      this.state = {
-        status: "success",
-        selectedFile: fileName,
-      };
-      this.emit();
-    }, 1000);
+  markSuccess(fileName: string) {
+    this.state = {
+      status: "success",
+      selectedFile: fileName,
+      errorMessage: undefined,
+    };
+    this.emit();
   }
 
   failIngestion(message: string) {
@@ -75,6 +76,8 @@ export const ingestionUI = {
   getSnapshot: ingestionUIStore.getSnapshot,
   startIngestion: (file: string) =>
     ingestionUIStore.startIngestion(file),
+  markSuccess: (file: string) =>
+    ingestionUIStore.markSuccess(file),
   failIngestion: (msg: string) =>
     ingestionUIStore.failIngestion(msg),
   reset: () => ingestionUIStore.reset(),

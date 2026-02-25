@@ -1,8 +1,10 @@
 import React from "react";
 import { FiAlertTriangle } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
 import { runUI } from "../../state/run_ui_store";
 
 export function RunGuard({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
   const { activeRunId } = React.useSyncExternalStore(
     runUI.subscribe,
     runUI.getSnapshot
@@ -20,7 +22,9 @@ export function RunGuard({ children }: { children: React.ReactNode }) {
             Please select an ingestion run from the Home page to access this section.
           </p>
           <div style={btnWrap}>
-            <span style={selectBtn}>Select Run</span>
+            <button style={selectBtn} onClick={() => navigate("/ingestion")}>
+              Select Ingestion
+            </button>
           </div>
         </div>
       </div>
@@ -72,7 +76,9 @@ const btnWrap: React.CSSProperties = {
 };
 
 const selectBtn: React.CSSProperties = {
-  display: "inline-block",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   padding: "10px 20px",
   background: "#f0f1f5",
   color: "#6366f1",
@@ -80,4 +86,6 @@ const selectBtn: React.CSSProperties = {
   fontWeight: 600,
   fontSize: 13,
   letterSpacing: "0.3px",
+  border: "1px solid #d1d5db",
+  cursor: "pointer",
 };

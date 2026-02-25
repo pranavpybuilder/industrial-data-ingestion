@@ -1,0 +1,70 @@
+{
+  "source_type": "rfid",
+  "schema_version": "1.0.0",
+  "description": "Canonical RFID event schema",
+  "canonical_fields": [
+    {
+      "canonical_name": "tag_id",
+      "aliases": ["tag_id", "rfid_tag", "tag", "card_id"],
+      "required": true,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "event_time",
+      "aliases": ["event_time", "timestamp", "scan_time", "created_on"],
+      "required": true,
+      "data_type": "datetime",
+      "transform_rule": "to_datetime_utc"
+    },
+    {
+      "canonical_name": "reader_id",
+      "aliases": ["reader_id", "scanner_id", "reader", "gateway_id"],
+      "required": true,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "event_type",
+      "aliases": ["event_type", "scan_type", "state"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "lower_text"
+    },
+    {
+      "canonical_name": "location",
+      "aliases": ["location", "zone", "area", "station"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "signal_strength",
+      "aliases": ["signal_strength", "rssi", "strength"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "equipment_id",
+      "aliases": ["equipment_id", "machine_id", "asset_id"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "status_code",
+      "aliases": ["status_code", "result_code"],
+      "required": false,
+      "data_type": "int",
+      "transform_rule": "to_int"
+    },
+    {
+      "canonical_name": "description",
+      "aliases": ["description", "message", "event_description"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    }
+  ]
+}

@@ -1,18 +1,22 @@
 import { useState } from "react";
 import { FiUploadCloud } from "react-icons/fi";
+
 import FileUploadCard from "../../components/ingestion/FileUploadCard";
 import IngestionActions from "../../components/ingestion/IngestionActions";
 import IngestionStatusBanner from "../../components/ingestion/IngestionStatusBanner";
-import { runUI } from "../../state/run_ui_store";
+import { frontendApi } from "../../services/frontendApi";
+import { clearActiveRunContext, onRunChange } from "../../state/state_reset";
 
-export type IngestionSource =
-  | "SAP"
-  | "RFID"
-  | "PLC"
-  | "EXCEL"
-  | "ENERGY";
-
+export type IngestionSource = "SAP" | "RFID" | "PLC" | "EXCEL" | "ENERGY";
 export type IngestionStatus = "idle" | "success" | "failed";
+
+const SOURCE_MAP: Record<IngestionSource, string> = {
+  SAP: "sap",
+  RFID: "rfid",
+  PLC: "plc",
+  EXCEL: "generic_tabular",
+  ENERGY: "energy",
+};
 
 const fadeKeyframes = `
 @keyframes fadeIn {
@@ -23,30 +27,42 @@ const fadeKeyframes = `
 
 const Ingestion = () => {
   const [source, setSource] = useState<IngestionSource | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [filePath, setFilePath] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [status, setStatus] = useState<IngestionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
 
   const handleIngest = async () => {
-    if (!file || !source) return;
+    if (!source || !filePath) return;
 
     setStatus("idle");
     setError(null);
+    setIsRunning(true);
+    clearActiveRunContext();
 
-    try {
-      /**
-       * 🔌 BACKEND HOOK (future)
-       * ipc.ingest({ source, file })
-       */
-      await new Promise((res) => setTimeout(res, 900));
+    const result = await frontendApi.uploadFile(filePath, SOURCE_MAP[source]);
+    setIsRunning(false);
 
-      // ✅ Mock success
-      runUI.setActiveRun(file.name);
-      setStatus("success");
-    } catch (err) {
+    if (!result.success) {
       setStatus("failed");
-      setError("Invalid schema or unsupported columns");
+      setError(result.message || "Pipeline failed");
+      const failedRunId = result.data?.run_id;
+      if (failedRunId) {
+        onRunChange(String(failedRunId));
+      }
+      return;
     }
+
+    const runId = result.data?.run_id;
+    if (!runId) {
+      setStatus("failed");
+      setError("Backend did not return run_id");
+      return;
+    }
+
+    onRunChange(runId);
+    setStatus("success");
   };
 
   return (
@@ -59,26 +75,28 @@ const Ingestion = () => {
           </div>
           <div>
             <h1 style={styles.title}>Data Ingestion</h1>
-            <p style={styles.subtitle}>Ingest datasets from industrial sources.</p>
+            <p style={styles.subtitle}>Run full offline ingestion pipeline (CSV/XLSX).</p>
           </div>
         </header>
 
         <FileUploadCard
           source={source}
           onSourceChange={setSource}
-          file={file}
-          onFileChange={setFile}
+          fileName={fileName}
+          onFileSelected={(selectedPath, selectedName) => {
+            setFilePath(selectedPath);
+            setFileName(selectedName);
+            setStatus("idle");
+            setError(null);
+          }}
         />
 
         <IngestionActions
-          disabled={!file || !source}
+          disabled={!filePath || !source || isRunning}
           onIngest={handleIngest}
         />
 
-        <IngestionStatusBanner
-          status={status}
-          error={error}
-        />
+        <IngestionStatusBanner status={status} error={error} />
       </section>
     </>
   );

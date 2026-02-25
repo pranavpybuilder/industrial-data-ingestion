@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+from typing import Optional
 
 from ingestion.base_ingestor import BaseIngestor
 from ingestion.readers.csv_reader import CSVReader
@@ -21,12 +22,15 @@ class RFIDIngestor(BaseIngestor):
         source_path: str,
         schema_path: str,
         output_dir: str = "data/raw/rfid",
+        run_id: Optional[str] = None,
     ):
         super().__init__(
             source_name="rfid",
             source_path=source_path,
             schema_path=schema_path,
             output_dir=output_dir,
+            run_id=run_id,
+            schema_type="rfid",
         )
 
     # ------------------------------------------------------------------
@@ -65,20 +69,13 @@ class RFIDIngestor(BaseIngestor):
         """
         Extend base ingestion with RFID-specific normalization.
         """
-
-        df = self.read()
-        self._validate_not_empty(df)
-
-        # RFID-specific cleanup BEFORE schema enforcement
-        df = self._normalize_events(df)
-
-        # Standard pipeline
-        self._validate_schema(df)
-        self._validate_types(df)
-        self._validate_time(df)
-
-        versioned_path = self._persist(df)
-        return self._build_metadata(versioned_path, df)
+        raw_df = self.read()
+        self._validate_not_empty(raw_df)
+        normalized_df = self._normalize_events(raw_df)
+        return self.ingest_dataframe(
+            data=normalized_df,
+            original_column_snapshot=list(raw_df.columns),
+        )
 
     # ------------------------------------------------------------------
     # RFID-specific logic
@@ -90,17 +87,16 @@ class RFIDIngestor(BaseIngestor):
         - Remove duplicate reads
         """
 
-        required_cols = {"tag_id", "event_time", "reader_id"}
-        missing = required_cols - set(df.columns)
-
-        if missing:
-            raise ValueError(
-                f"RFID normalization failed. Missing columns: {missing}"
-            )
-
         # Drop exact duplicate reads
-        df = df.drop_duplicates(
-            subset=["tag_id", "reader_id", "event_time"]
-        ).reset_index(drop=True)
+        dedupe_cols = [
+            col
+            for col in ["tag_id", "reader_id", "event_time"]
+            if col in df.columns
+        ]
+
+        if dedupe_cols:
+            df = df.drop_duplicates(subset=dedupe_cols)
+
+        df = df.reset_index(drop=True)
 
         return df

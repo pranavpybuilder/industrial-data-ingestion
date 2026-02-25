@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { runUI } from "../../state/run_ui_store";
 import  RunSelectorModal  from "../RunSelector/RunSelectorModal";
+import { clearActiveRunContext } from "../../state/state_reset";
 
 const ActiveRunBar = () => {
   const runState = useSyncExternalStore(
@@ -36,7 +37,7 @@ const ActiveRunBar = () => {
 
         {hasRun && (
           <button
-            onClick={() => runUI.clearRun()}
+            onClick={() => clearActiveRunContext()}
             onMouseEnter={() => setHoveredBtn("clear")}
             onMouseLeave={() => setHoveredBtn(null)}
             style={{

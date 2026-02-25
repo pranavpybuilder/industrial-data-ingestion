@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { runUI } from "../../state/run_ui_store";
+import { clearActiveRunContext, onRunChange } from "../../state/state_reset";
 import { useRunUI } from "../../state/useRunUI";
 import { frontendApi, RunMeta } from "../../services/frontendApi";
 
@@ -64,7 +64,7 @@ const RunSelector = () => {
         {filteredRuns.map((runId) => (
           <button
             key={runId}
-            onClick={() => runUI.setActiveRun(runId)}
+            onClick={() => onRunChange(runId)}
             style={{
               width: "100%",
               textAlign: "left",
@@ -87,7 +87,7 @@ const RunSelector = () => {
 
       {activeRunId && (
         <button
-          onClick={() => runUI.clearRun()}
+          onClick={() => clearActiveRunContext()}
           style={{
             width: "100%",
             marginTop: "8px",

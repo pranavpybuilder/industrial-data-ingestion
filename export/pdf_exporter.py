@@ -19,6 +19,8 @@ from reportlab.platypus import (
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
+from utils.paths import EXPORT_DIR
+
 
 class PDFExporter:
     """
@@ -51,18 +53,12 @@ class PDFExporter:
             spaceBefore=12,
         ))
         
-        self.styles.add(ParagraphStyle(
-            name="CustomNormal",
-            parent=self.styles["Normal"],
-            fontSize=11,
-            leading=14,
-        ))
     
     def export_insights_report(
         self,
         run_id: str,
         unified_insights: List[Dict[str, Any]],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export insights to PDF report.
@@ -113,7 +109,7 @@ class PDFExporter:
         self,
         run_id: str,
         profiling_results: Dict[str, Any],
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export profiling results to PDF report.
@@ -173,7 +169,7 @@ class PDFExporter:
         run_id: str,
         unified_insights: List[Dict[str, Any]],
         profiling_results: Optional[Dict[str, Any]] = None,
-        output_dir: str = "data/exports",
+        output_dir: str = str(EXPORT_DIR),
     ) -> str:
         """
         Export comprehensive report with insights and profiling.

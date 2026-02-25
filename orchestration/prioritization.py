@@ -32,7 +32,10 @@ class InsightPrioritizer:
         """
         
         for insight in insights:
-            severity = insight.get("severity", "INFO")
+            severity = self._normalize_severity(
+                insight.get("severity", "INFO")
+            )
+            insight["severity"] = severity
             source = insight.get("source", "RULE")
             priority_score = insight.get("priority_score", 0.5)
             
@@ -43,11 +46,13 @@ class InsightPrioritizer:
                 tier = "HIGH"
             elif severity == "WARNING":
                 tier = "MEDIUM"
+            elif severity == "MEDIUM":
+                tier = "MEDIUM"
             else:
                 tier = "LOW"
             
             # Determine if action is needed
-            needs_action = severity in ["CRITICAL", "WARNING"]
+            needs_action = severity in ["CRITICAL", "WARNING", "MEDIUM"]
             
             # Assign action type
             if source == "MERGED":
@@ -56,6 +61,8 @@ class InsightPrioritizer:
             elif severity == "CRITICAL":
                 action_type = "ALERT"
             elif severity == "WARNING":
+                action_type = "INVESTIGATE"
+            elif severity == "MEDIUM":
                 action_type = "INVESTIGATE"
             else:
                 action_type = "MONITOR"
@@ -102,5 +109,15 @@ class InsightPrioritizer:
             tier = insight.get("priority_tier", "LOW")
             if tier in tiers:
                 tiers[tier].append(insight)
-        
+
         return tiers
+
+    def _normalize_severity(self, severity: str) -> str:
+        normalized = str(severity).strip().upper()
+        if normalized in {"CRITICAL", "WARNING", "MEDIUM", "INFO"}:
+            return normalized
+        if normalized in {"HIGH", "CRIT"}:
+            return "CRITICAL"
+        if normalized in {"WARN"}:
+            return "WARNING"
+        return "INFO"

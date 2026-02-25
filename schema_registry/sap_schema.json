@@ -1,0 +1,107 @@
+{
+  "source_type": "sap",
+  "schema_version": "1.0.0",
+  "description": "Canonical SAP breakdown schema",
+  "canonical_fields": [
+    {
+      "canonical_name": "order_number",
+      "aliases": ["order", "notification", "order_id", "wo_number"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "equipment_id",
+      "aliases": ["equipment", "equipment_number", "machine_id", "asset_id", "machine_name"],
+      "required": true,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "event_time",
+      "aliases": [
+        "start_date",
+        "created_on",
+        "date",
+        "report_date",
+        "malfunction_start_date",
+        "malfunct_start",
+        "timestamp",
+        "event_time"
+      ],
+      "required": true,
+      "data_type": "datetime",
+      "transform_rule": "to_datetime_utc"
+    },
+    {
+      "canonical_name": "finish_time",
+      "aliases": ["finish_date", "malfunction_end_date", "malfunct_end", "end_date", "end_time"],
+      "required": false,
+      "data_type": "datetime",
+      "transform_rule": "to_datetime_utc"
+    },
+    {
+      "canonical_name": "breakdown_count",
+      "aliases": ["breakdown", "breakdown_indicator", "breakdown_count", "failure_count", "notification_count"],
+      "required": true,
+      "data_type": "int",
+      "transform_rule": "to_int_default_one"
+    },
+    {
+      "canonical_name": "downtime_hours",
+      "aliases": ["downtime", "breakdown_dur", "downtime_hours", "duration", "duration_hours"],
+      "required": false,
+      "data_type": "float",
+      "transform_rule": "to_float"
+    },
+    {
+      "canonical_name": "failure_type",
+      "aliases": ["coding_code_txt", "failure_type", "notif_type", "notification_type", "event_type"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "root_cause",
+      "aliases": ["root_cause", "why1", "cause", "problem_cause"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "technician",
+      "aliases": ["technician", "reported_by", "why_why_done_by", "created_by", "changed_by"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "maintenance_type",
+      "aliases": ["order_type", "maint_type", "maintenance_type", "coding"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "upper_text"
+    },
+    {
+      "canonical_name": "work_center",
+      "aliases": ["work_center", "maintplant", "planner_group"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "functional_location",
+      "aliases": ["functional_location", "functional_loc", "location", "funct_loc"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    },
+    {
+      "canonical_name": "spare_part",
+      "aliases": ["spare_part", "spare_part_replaced", "part_replaced", "part"],
+      "required": false,
+      "data_type": "string",
+      "transform_rule": "to_string"
+    }
+  ]
+}

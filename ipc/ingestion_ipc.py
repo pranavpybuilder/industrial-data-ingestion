@@ -1,10 +1,37 @@
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+from app.pipeline_runner import PipelineRunner
 from storage.repositories.ingestion_repo import IngestionRepository
 from storage.repositories.run_repo import RunRepository
-from ingestion.upload_handler import handle_file_upload
 
 ingestion_repo = IngestionRepository()
 run_repo = RunRepository()
+pipeline_runner = PipelineRunner()
+
+SOURCE_TYPE_MAP = {
+    "SAP": "sap",
+    "RFID": "rfid",
+    "PLC": "plc",
+    "EXCEL": "generic_tabular",
+    "ENERGY": "energy",
+    "REPORT_EXCEL": "report_excel",
+    "OPERATIONAL_EXCEL": "operational_excel",
+}
+
+
+def _normalize_source_type(source_type: Optional[str]) -> Optional[str]:
+    if not source_type:
+        return None
+
+    cleaned = source_type.strip()
+    if cleaned in SOURCE_TYPE_MAP:
+        return SOURCE_TYPE_MAP[cleaned]
+
+    lowered = cleaned.lower()
+    if lowered in SOURCE_TYPE_MAP.values():
+        return lowered
+
+    return cleaned
 
 
 def upload_file_ipc(
@@ -12,8 +39,7 @@ def upload_file_ipc(
     source_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    IPC handler: upload and ingest a file.
-    Called by the frontend when the user selects a file.
+    IPC handler: run full ingestion pipeline for a file.
     """
     if not file_path:
         return {
@@ -22,22 +48,27 @@ def upload_file_ipc(
             "message": "File path is required",
         }
 
-    result = handle_file_upload(
+    normalized_source = _normalize_source_type(source_type)
+    result = pipeline_runner.run_single_file(
         file_path=file_path,
-        source_type=source_type,
+        source_type=normalized_source,
     )
 
     if not result.get("success"):
+        step = result.get("failed_step", "unknown")
         return {
             "success": False,
-            "data": None,
-            "message": result.get("error", "Ingestion failed"),
+            "data": result,
+            "message": f"Pipeline failed at '{step}': {result.get('error')}",
         }
 
     return {
         "success": True,
         "data": result,
-        "message": f"Ingested {result['rows']} rows from {result['file_name']}",
+        "message": (
+            f"Run {result['run_id']} completed successfully. "
+            f"Ingested {result['rows']} rows."
+        ),
     }
 
 
@@ -63,6 +94,7 @@ def get_ingestion_status_ipc(run_id: str) -> Dict[str, Any]:
         "success": True,
         "data": {
             "run_id": run_id,
+            "status": run.get("status"),
             "has_ingestion": len(files) > 0,
             "files": files,
         },

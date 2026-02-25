@@ -5,10 +5,13 @@ from storage.connection import get_connection
 
 
 class RunStatus:
-    CREATED = "CREATED"
-    PROCESSING = "PROCESSING"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+    # Backward-compatible aliases for older callers/records.
+    CREATED = PENDING
+    PROCESSING = RUNNING
 
 
 class RunRepository:
@@ -25,7 +28,7 @@ class RunRepository:
         run_id: str,
         run_name: str,
         source_type: str,
-        status: str = RunStatus.CREATED,
+        status: str = RunStatus.PENDING,
     ) -> None:
         conn = get_connection()
 
@@ -39,8 +42,8 @@ class RunRepository:
 
         conn.execute(
             """
-            INSERT INTO runs (run_id, run_name, source_type, status)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO runs (run_id, run_name, source_type, status, error_message, failed_step)
+            VALUES (?, ?, ?, ?, NULL, NULL)
             """,
             (run_id, run_name, source_type, status),
         )
@@ -48,20 +51,49 @@ class RunRepository:
     # --------------------------------------------------
     # UPDATE RUN STATUS
     # --------------------------------------------------
-    def update_status(self, run_id: str, status: str) -> None:
+    def update_status(
+        self,
+        run_id: str,
+        status: str,
+        error_message: Optional[str] = None,
+        failed_step: Optional[str] = None,
+    ) -> None:
         conn = get_connection()
 
-        result = conn.execute(
-            """
-            UPDATE runs
-            SET status = ?
-            WHERE run_id = ?
-            """,
-            (status, run_id),
-        )
+        if status == RunStatus.FAILED:
+            result = conn.execute(
+                """
+                UPDATE runs
+                SET status = ?, error_message = ?, failed_step = ?
+                WHERE run_id = ?
+                """,
+                (status, error_message, failed_step, run_id),
+            )
+        else:
+            result = conn.execute(
+                """
+                UPDATE runs
+                SET status = ?, error_message = NULL, failed_step = NULL
+                WHERE run_id = ?
+                """,
+                (status, run_id),
+            )
 
         if result.rowcount == 0:
             raise ValueError(f"Run with ID '{run_id}' not found.")
+
+    def mark_failed(
+        self,
+        run_id: str,
+        error_message: str,
+        failed_step: str,
+    ) -> None:
+        self.update_status(
+            run_id=run_id,
+            status=RunStatus.FAILED,
+            error_message=error_message,
+            failed_step=failed_step,
+        )
 
     # --------------------------------------------------
     # GET RUN
@@ -71,7 +103,7 @@ class RunRepository:
 
         row = conn.execute(
             """
-            SELECT run_id, run_name, source_type, created_at, status
+            SELECT run_id, run_name, source_type, created_at, status, error_message, failed_step
             FROM runs
             WHERE run_id = ?
             """,
@@ -87,6 +119,8 @@ class RunRepository:
             "source_type": row[2],
             "created_at": row[3],
             "status": row[4],
+            "error_message": row[5],
+            "failed_step": row[6],
         }
 
     # --------------------------------------------------
@@ -97,7 +131,7 @@ class RunRepository:
 
         rows = conn.execute(
             """
-            SELECT run_id, run_name, source_type, created_at, status
+            SELECT run_id, run_name, source_type, created_at, status, error_message, failed_step
             FROM runs
             ORDER BY created_at DESC
             """
@@ -110,6 +144,8 @@ class RunRepository:
                 "source_type": r[2],
                 "created_at": r[3],
                 "status": r[4],
+                "error_message": r[5],
+                "failed_step": r[6],
             }
             for r in rows
         ]
@@ -136,17 +172,17 @@ class RunRepository:
             SET status = ?
             WHERE status = ?
             """,
-            (RunStatus.SUCCESS, RunStatus.CREATED),
+            (RunStatus.SUCCESS, RunStatus.PENDING),
         )
 
-        # Set selected run as PROCESSING
+        # Set selected run as RUNNING
         conn.execute(
             """
             UPDATE runs
             SET status = ?
             WHERE run_id = ?
             """,
-            (RunStatus.PROCESSING, run_id),
+            (RunStatus.RUNNING, run_id),
         )
 
     # --------------------------------------------------
@@ -157,7 +193,7 @@ class RunRepository:
 
         row = conn.execute(
             """
-            SELECT run_id, run_name, source_type, created_at, status
+            SELECT run_id, run_name, source_type, created_at, status, error_message, failed_step
             FROM runs
             ORDER BY created_at DESC
             LIMIT 1
@@ -173,23 +209,25 @@ class RunRepository:
             "source_type": row[2],
             "created_at": row[3],
             "status": row[4],
+            "error_message": row[5],
+            "failed_step": row[6],
         }
 
     # --------------------------------------------------
-    # GET ACTIVE RUN (PROCESSING status)
+    # GET ACTIVE RUN (RUNNING status)
     # --------------------------------------------------
     def get_active_run(self) -> Optional[Dict]:
         conn = get_connection()
 
         row = conn.execute(
             """
-            SELECT run_id, run_name, source_type, created_at, status
+            SELECT run_id, run_name, source_type, created_at, status, error_message, failed_step
             FROM runs
-            WHERE status = ?
+            WHERE status IN (?, ?)
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            (RunStatus.PROCESSING,),
+            (RunStatus.RUNNING, "PROCESSING"),
         ).fetchone()
 
         if row is None:
@@ -201,6 +239,8 @@ class RunRepository:
             "source_type": row[2],
             "created_at": row[3],
             "status": row[4],
+            "error_message": row[5],
+            "failed_step": row[6],
         }
 
     # --------------------------------------------------

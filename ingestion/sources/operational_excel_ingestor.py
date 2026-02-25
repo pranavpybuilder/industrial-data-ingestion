@@ -1,6 +1,5 @@
-from pathlib import Path
 import pandas as pd
-import json
+from typing import Optional
 
 from ingestion.base_ingestor import BaseIngestor
 from ingestion.readers.excel_reader import ExcelReader
@@ -24,23 +23,16 @@ class OperationalExcelIngestor(BaseIngestor):
         self,
         source_path: str,
         output_dir: str = "data/raw/operational_excels",
+        run_id: Optional[str] = None,
     ):
         super().__init__(
             source_name="operational_excel",
             source_path=source_path,
             schema_path="",   # schema-less by design (empty string for typing safety)
             output_dir=output_dir,
+            run_id=run_id,
+            schema_type="generic",
         )
-
-    # ------------------------------------------------------------------
-    # Mandatory abstract method implementation
-    # ------------------------------------------------------------------
-
-    def read(self) -> pd.DataFrame:
-        """
-        Read raw data from file (Excel or CSV).
-        """
-        return self._read_raw_sheet()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -50,35 +42,17 @@ class OperationalExcelIngestor(BaseIngestor):
         raw_df = self._read_raw_sheet()
         self._validate_not_empty(raw_df)
 
-        row_profiles = self._profile_rows(raw_df)
-        table_regions = self._detect_tables(row_profiles)
+        prepared = self._prepare_primary_table(raw_df)
+        self._validate_not_empty(prepared)
 
-        tables = self._extract_tables(raw_df, table_regions)
-        metadata = self._extract_metadata(raw_df, table_regions)
+        metadata = self.ingest_dataframe(
+            data=prepared,
+            original_column_snapshot=[str(c) for c in raw_df.columns],
+        )
+        metadata["tables_detected"] = 1
+        metadata["notes"] = []
 
-        output_paths = self._persist_tables(tables, metadata)
-
-        # Determine a combined row count and column list from extracted tables
-        total_rows = sum(len(t["data"]) for t in tables) if tables else len(raw_df)
-        all_columns = []
-        for t in tables:
-            all_columns.extend([c for c in t["data"].columns if c not in all_columns])
-        if not all_columns:
-            all_columns = list(raw_df.columns)
-
-        return {
-            "source": self.source_name,
-            "run_id": self.run_id,
-            "file_name": Path(self.source_path).name,
-            "rows": total_rows,
-            "columns": all_columns,
-            "schema_hash": self._generate_schema_hash(raw_df),
-            "output_path": output_paths[0] if output_paths else str(self.output_dir),
-            "ingested_at": self.ingestion_time.isoformat(),
-            "tables_detected": len(tables),
-            "output_paths": output_paths,
-            "metadata": metadata,
-        }
+        return metadata
 
     # ------------------------------------------------------------------
     # Step 1: Read entire sheet with zero assumptions
@@ -87,6 +61,7 @@ class OperationalExcelIngestor(BaseIngestor):
     def _read_raw_sheet(self) -> pd.DataFrame:
         return ExcelReader.read(
             file_path=str(self.source_path),
+            sheet_name="auto",
             header=None
         )
 
@@ -94,141 +69,68 @@ class OperationalExcelIngestor(BaseIngestor):
     # Step 2: Row profiling (heuristics)
     # ------------------------------------------------------------------
 
-    def _profile_rows(self, df: pd.DataFrame) -> list[dict]:
+    def _prepare_primary_table(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Profile each row to understand its nature.
-        Returns a list of row profile dictionaries.
+        Build a usable tabular DataFrame from a schema-less Excel sheet.
         """
+        header_idx = self._detect_header_row(raw_df)
 
-        profiles: list[dict] = []
-
-        for row_idx in range(len(df)):
-            row = df.iloc[row_idx]
-
-            non_null = int(row.notna().sum())
-            numeric = int(pd.to_numeric(row, errors="coerce").notna().sum())
-
-            profiles.append(
-                {
-                    "row_index": row_idx,
-                    "non_null_ratio": non_null / max(len(row), 1),
-                    "numeric_ratio": numeric / max(non_null, 1),
-                }
+        if header_idx is None:
+            df = raw_df.copy()
+            df.columns = [f"col_{i+1}" for i in range(df.shape[1])]
+        else:
+            headers = (
+                raw_df.iloc[header_idx]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .replace("", pd.NA)
             )
-
-        return profiles
-
-    # ------------------------------------------------------------------
-    # Step 3: Detect table regions
-    # ------------------------------------------------------------------
-
-    def _detect_tables(self, profiles: list[dict]) -> list[tuple[int, int]]:
-        """
-        Detect contiguous table-like row regions.
-        """
-
-        table_regions: list[tuple[int, int]] = []
-        current_start: int | None = None
-
-        for profile in profiles:
-            row_index = profile["row_index"]
-
-            is_table_row = (
-                profile["non_null_ratio"] > 0.3
-                and profile["numeric_ratio"] > 0.2
-            )
-
-            if is_table_row and current_start is None:
-                current_start = row_index
-
-            if not is_table_row and current_start is not None:
-                table_regions.append((current_start, row_index - 1))
-                current_start = None
-
-        if current_start is not None:
-            table_regions.append((current_start, profiles[-1]["row_index"]))
-
-        return table_regions
-
-    # ------------------------------------------------------------------
-    # Step 4: Extract raw tables
-    # ------------------------------------------------------------------
-
-    def _extract_tables(
-        self,
-        df: pd.DataFrame,
-        regions: list[tuple[int, int]],
-    ) -> list[dict]:
-        tables: list[dict] = []
-
-        for idx, (start, end) in enumerate(regions, start=1):
-            table_df = df.iloc[start : end + 1].copy()
-            table_df.reset_index(drop=True, inplace=True)
-
-            tables.append(
-                {
-                    "name": f"table_{idx}_raw",
-                    "data": table_df,
-                    "row_range": (start, end),
-                }
-            )
-
-        return tables
-
-    # ------------------------------------------------------------------
-    # Step 5: Extract metadata
-    # ------------------------------------------------------------------
-
-    def _extract_metadata(
-        self,
-        df: pd.DataFrame,
-        table_regions: list[tuple[int, int]],
-    ) -> dict:
-        table_rows: set[int] = set()
-
-        for start, end in table_regions:
-            table_rows.update(range(start, end + 1))
-
-        metadata_lines: list[str] = []
-
-        for row_idx in range(len(df)):
-            if row_idx not in table_rows:
-                row_text = " ".join(
-                    str(x) for x in df.iloc[row_idx].dropna().tolist()
+            df = raw_df.iloc[header_idx + 1 :].copy()
+            df.columns = headers.fillna(
+                pd.Series(
+                    [f"col_{i+1}" for i in range(len(headers))],
+                    index=headers.index,
                 )
-                if row_text.strip():
-                    metadata_lines.append(row_text)
+            )
 
-        return {
-            "file_name": Path(self.source_path).name,
-            "total_rows": int(len(df)),
-            "detected_tables": int(len(table_regions)),
-            "notes": metadata_lines,
-        }
+        df = df.dropna(how="all").reset_index(drop=True)
+        df.columns = (
+            pd.Index(df.columns)
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .str.replace(" ", "_")
+            .str.replace("/", "_")
+            .str.replace(r"[^a-z0-9_]+", "", regex=True)
+        )
 
-    # ------------------------------------------------------------------
-    # Step 6: Persist tables + metadata
-    # ------------------------------------------------------------------
+        # Coerce mostly-numeric columns to numeric
+        for column in df.columns:
+            numeric = pd.to_numeric(df[column], errors="coerce")
+            if numeric.notna().mean() >= 0.8:
+                df[column] = numeric
 
-    def _persist_tables(
-        self,
-        tables: list[dict],
-        metadata: dict,
-    ) -> list[str]:
-        run_dir = self.output_dir / f"run_{self.run_id}"
-        run_dir.mkdir(parents=True, exist_ok=False)
+        return df
 
-        output_paths: list[str] = []
+    def _detect_header_row(self, df: pd.DataFrame) -> Optional[int]:
+        scan_limit = min(len(df), 15)
+        best_idx: Optional[int] = None
+        best_score = 0.0
 
-        metadata_path = run_dir / "metadata.json"
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=4)
+        for row_idx in range(scan_limit):
+            row = df.iloc[row_idx]
+            non_null = row.dropna()
+            if non_null.empty:
+                continue
 
-        output_paths.append(str(metadata_path))
+            as_text = non_null.astype(str).str.strip()
+            unique_ratio = as_text.nunique() / max(len(as_text), 1)
+            alpha_ratio = as_text.str.contains(r"[A-Za-z]", regex=True).mean()
+            score = unique_ratio * 0.6 + alpha_ratio * 0.4
 
-        for table in tables:
-            table_path = run_dir / f"{table['name']}.parquet"
-            table["data"].to_parquet(table_path, index=False)
-            output_paths.append(str(table_path))
+            if score > best_score and len(non_null) >= 2:
+                best_idx = row_idx
+                best_score = score
 
-        return output_paths
+        return best_idx
