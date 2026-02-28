@@ -3,6 +3,10 @@ Main desktop application entry point.
 Fully offline.
 Production ready.
 Bridge injected at document creation.
+
+Renderer path resolution:
+  - Development:   PROJECT_ROOT / frontend / electron_app / renderer / dist / index.html
+  - Frozen (NSIS): sys._MEIPASS / renderer / dist / index.html
 """
 
 import sys
@@ -23,6 +27,34 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEngineScript
 from PySide6.QtWebChannel import QWebChannel
+
+
+def get_renderer_path() -> Path:
+    """
+    Resolves renderer index.html for both dev and PyInstaller frozen modes.
+
+    Development mode:
+        Uses PROJECT_ROOT to find the renderer dist directory.
+
+    Frozen mode (PyInstaller / NSIS install):
+        Files are bundled inside sys._MEIPASS by PyInstaller.
+        The .spec file must include renderer/dist/ as data files:
+          datas=[('frontend/electron_app/renderer/dist', 'renderer/dist')]
+    """
+    if getattr(sys, "frozen", False):
+        # Frozen by PyInstaller — files are in sys._MEIPASS
+        base = Path(sys._MEIPASS)
+    else:
+        # Development mode — navigate from main.py up to electron_app
+        base = Path(__file__).resolve().parent.parent
+
+    path = base / "renderer" / "dist" / "index.html"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Renderer not built. Expected: {path}\n"
+            f"Run: cd frontend/electron_app/renderer && npm run build"
+        )
+    return path
 
 
 class FrontendMainWindow(QMainWindow):
@@ -85,22 +117,38 @@ class FrontendMainWindow(QMainWindow):
         self.web_view.page().scripts().insert(script)
 
         # -------------------------------------------------
-        # Load frontend
+        # Load frontend — supports both dev and frozen modes
         # -------------------------------------------------
-        frontend_index_path = (
-            PROJECT_ROOT
-            / "frontend"
-            / "electron_app"
-            / "renderer"
-            / "dist"
-            / "index.html"
-        )
-
-        if frontend_index_path.exists():
+        try:
+            frontend_index_path = get_renderer_path()
             print(f"Loading frontend from: {frontend_index_path}")
             self.web_view.setUrl(QUrl.fromLocalFile(str(frontend_index_path)))
-        else:
-            self.web_view.setHtml("<h1>Frontend build not found</h1>")
+        except FileNotFoundError as e:
+            error_html = f"""
+            <html>
+            <head><style>
+                body {{ font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0;
+                       display: flex; align-items: center; justify-content: center; height: 100vh;
+                       margin: 0; }}
+                .card {{ background: #1e293b; border-radius: 16px; padding: 40px; max-width: 600px;
+                         border: 1px solid #334155; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }}
+                h1 {{ color: #f87171; margin-top: 0; font-size: 22px; }}
+                p {{ line-height: 1.6; color: #94a3b8; }}
+                code {{ background: #334155; padding: 4px 8px; border-radius: 6px; font-size: 13px;
+                        color: #a5b4fc; display: block; margin: 12px 0; padding: 12px; }}
+            </style></head>
+            <body>
+                <div class="card">
+                    <h1>⚠ Frontend Not Built</h1>
+                    <p>{str(e).replace(chr(10), '<br>')}</p>
+                    <p>To fix this, run the following commands:</p>
+                    <code>cd frontend/electron_app/renderer<br>npm install<br>npm run build</code>
+                    <p>Then restart the application.</p>
+                </div>
+            </body>
+            </html>
+            """
+            self.web_view.setHtml(error_html)
 
         self.setCentralWidget(self.web_view)
 

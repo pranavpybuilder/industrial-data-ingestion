@@ -1,8 +1,28 @@
+"""
+Base Ingestor — Production-grade ingestion lifecycle.
+
+Pipeline order:
+1. Read raw data (subclass implements read())
+2. Preprocess (optional override)
+3. Validate not empty
+4. Schema mapping (if schema_type is set)
+5. Time validation (no future timestamps)
+6. Version and persist to Parquet
+7. Return metadata for downstream layers
+
+When schema_type is None (used by GenericTabularIngestor):
+- Schema registry is completely skipped
+- No column mapping is attempted
+- Basic validation (not empty) still runs
+- Time validation still runs if time columns are found
+"""
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 import hashlib
 from typing import Any, Dict, List, Optional
+
 import pandas as pd
 
 from schema_registry.column_mapper import ColumnMapper, ColumnMappingError
@@ -48,8 +68,14 @@ class BaseIngestor(ABC):
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.versioner = DataVersioner(self.output_dir)
-        self.schema_registry = SchemaRegistry()
-        self.column_mapper = ColumnMapper()
+
+        # Only instantiate schema registry and mapper if schema_type is set
+        if self.schema_type:
+            self.schema_registry = SchemaRegistry()
+            self.column_mapper = ColumnMapper()
+        else:
+            self.schema_registry = None
+            self.column_mapper = None
 
     # ------------------------------------------------------------------
     # Mandatory methods to be implemented by child ingestors
@@ -61,7 +87,6 @@ class BaseIngestor(ABC):
         Read raw data from the source.
         Must return a pandas DataFrame.
         """
-        pass
 
     # ------------------------------------------------------------------
     # Core ingestion pipeline (DO NOT OVERRIDE)
@@ -70,7 +95,7 @@ class BaseIngestor(ABC):
     def ingest(self) -> dict:
         """
         Execute the full ingestion pipeline.
-        This method must never be overridden.
+        This method must never be overridden (use preprocess() for custom logic).
         """
         data = self.read()
         self._validate_not_empty(data)
@@ -93,6 +118,16 @@ class BaseIngestor(ABC):
     ) -> Dict[str, Any]:
         """
         Execute ingestion from an already loaded/preprocessed DataFrame.
+
+        When schema_type is set:
+          - Loads canonical schema from registry
+          - Maps columns via ColumnMapper
+          - Validates time columns
+
+        When schema_type is None:
+          - Skips all schema operations
+          - Only validates that data is not empty
+          - Runs basic time validation if time columns are found
         """
         self._validate_not_empty(data)
 
@@ -100,7 +135,8 @@ class BaseIngestor(ABC):
         mapping_report: Optional[Dict[str, Any]] = None
         schema_version: Optional[str] = None
 
-        if self.schema_type:
+        if self.schema_type and self.schema_registry and self.column_mapper:
+            # ── Schema-aware path: load schema, map columns, validate ──
             try:
                 schema = self.schema_registry.load_schema(self.schema_type)
                 schema_version = str(schema.get("schema_version", "unknown"))
@@ -117,10 +153,22 @@ class BaseIngestor(ABC):
             detected_time_column = self._resolve_time_column(working)
             if detected_time_column:
                 self._validate_no_future_time(working, detected_time_column)
-        else:
+        elif self.schema_path:
+            # ── Schema file path provided (legacy ingestors) ──
             self._validate_schema(working)
             self._validate_types(working)
             self._validate_time(working)
+        else:
+            # ── Schema-agnostic path (GenericTabularIngestor) ──
+            # Only run time validation if we detect time columns
+            detected_time_column = self._resolve_time_column(working)
+            if detected_time_column:
+                try:
+                    self._validate_no_future_time(working, detected_time_column)
+                except ValueError:
+                    # Don't crash on future timestamps in generic mode —
+                    # industrial data sometimes has future dates (planned maintenance)
+                    pass
 
         self._validate_not_empty(working)
         versioned_path = self._persist(working)
@@ -141,43 +189,69 @@ class BaseIngestor(ABC):
     # Validation helpers
     # ------------------------------------------------------------------
 
-    def _validate_not_empty(self, data: pd.DataFrame):
+    def _validate_not_empty(self, data: pd.DataFrame) -> None:
         if data is None or data.empty:
             raise ValueError(
                 f"[{self.source_name}] Ingestion failed: dataset is empty"
             )
 
-    def _validate_schema(self, data: pd.DataFrame):
+    def _validate_schema(self, data: pd.DataFrame) -> None:
         if self.schema_path is None:
             return
         SchemaValidator.validate(data, self.schema_path)
 
-    def _validate_types(self, data: pd.DataFrame):
+    def _validate_types(self, data: pd.DataFrame) -> None:
         if self.schema_path is None:
             return
         TypeValidator.validate(data, self.schema_path)
 
-    def _validate_time(self, data: pd.DataFrame):
+    def _validate_time(self, data: pd.DataFrame) -> None:
         if self.schema_path is None:
             return
         TimeValidator.validate(data, self.schema_path)
 
     @staticmethod
     def _resolve_time_column(data: pd.DataFrame) -> Optional[str]:
-        for candidate in [
+        """
+        Find the best time column in the DataFrame.
+
+        Checks an expanded list of common industrial datetime column names.
+        Returns the first match found.
+        """
+        candidates = [
             "event_time",
+            "created_on",
             "start_date",
             "date",
             "report_date",
             "timestamp",
-            "created_on",
-        ]:
+            "created_at",
+            "malfunct_start",
+            "malfunct_end",
+            "malfunction_end",
+            "mal_start_t",
+            "changed_on",
+            "order_date",
+            "event_date",
+            "occurred_at",
+            "end_date",
+            "completion_date",
+        ]
+        for candidate in candidates:
             if candidate in data.columns:
                 return candidate
+
+        # Also check for any column with 'date' or 'time' in the name
+        for col in data.columns:
+            col_lower = str(col).lower()
+            if any(token in col_lower for token in ("date", "time")):
+                return str(col)
+
         return None
 
     @staticmethod
     def _validate_no_future_time(data: pd.DataFrame, column: str) -> None:
+        """Validate that no timestamps are in the future."""
         now_utc = pd.Timestamp.utcnow()
         series = pd.to_datetime(data[column], errors="coerce", utc=True)
         future_count = int((series > now_utc).sum())
@@ -228,7 +302,7 @@ class BaseIngestor(ABC):
         """
         Metadata returned to orchestration layer.
         """
-        metadata = {
+        metadata: Dict[str, Any] = {
             "source": self.source_name,
             "run_id": self.run_id,
             "file_name": self.source_path.name,

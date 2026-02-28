@@ -27,6 +27,9 @@ from rule_engine.maintenance_rules import (
     VibrationSpikeRule,
     EnergyAnomalyRule,
     RFIDConnectivityRule,
+    RepeatFailureRule,
+    HighMTTRRule,
+    FailureEscalationRule,
 )
 
 from rule_engine.explainability import (
@@ -48,5 +51,8 @@ __all__ = [
     "VibrationSpikeRule",
     "EnergyAnomalyRule",
     "RFIDConnectivityRule",
+    "RepeatFailureRule",
+    "HighMTTRRule",
+    "FailureEscalationRule",
     "RuleExplainer",
 ]

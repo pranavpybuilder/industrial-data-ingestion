@@ -1,4 +1,6 @@
-# Core data handling
+# ===============================
+# Core Data Handling
+# ===============================
 pandas>=2.0.0
 numpy>=1.24.0
 
@@ -15,14 +17,31 @@ python-dateutil>=2.8.2
 # Logging & utilities
 pyyaml>=6.0.1
 
-# Optional (for future ML engine, offline)
+# ===============================
+# ML Engine (100% offline)
+# ===============================
 scikit-learn>=1.3.0
 scipy>=1.11.0
+statsmodels>=0.14.0
 joblib>=1.3.0
 
-# Export engine dependencies
+# ===============================
+# Export Engine
+# ===============================
 openpyxl>=3.1.0
 reportlab>=4.0.0
+python-docx>=1.1.0
+Pillow>=10.0.0
+
+# ===============================
+# Data Encoding & Detection
+# ===============================
+chardet>=5.0.0
+
+# ===============================
+# Embedded Database
+# ===============================
+duckdb>=0.9.0
 
 # ===============================
 # Frontend Desktop Application
@@ -33,5 +52,3 @@ PySide6>=6.7.0
 
 # Packaging into standalone .exe
 pyinstaller>=6.0.0
-
-duckdb

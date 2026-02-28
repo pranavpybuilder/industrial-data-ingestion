@@ -3,6 +3,7 @@ Excel exporter for insights, profiling results, and ML findings.
 """
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from abc import ABC
 import openpyxl
@@ -36,10 +37,11 @@ class ExcelExporter:
         """
         Export unified insights to Excel workbook.
         """
-        os.makedirs(output_dir, exist_ok=True)
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_dir}/insights_{run_id}_{timestamp}.xlsx"
+        filename = str(out / f"insights_{run_id}_{timestamp}.xlsx")
         
         workbook = openpyxl.Workbook()
         workbook.remove(workbook.active)
@@ -66,10 +68,11 @@ class ExcelExporter:
         """
         Export profiling results to Excel workbook.
         """
-        os.makedirs(output_dir, exist_ok=True)
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_dir}/profiling_{run_id}_{timestamp}.xlsx"
+        filename = str(out / f"profiling_{run_id}_{timestamp}.xlsx")
         
         workbook = openpyxl.Workbook()
         workbook.remove(workbook.active)
@@ -97,10 +100,11 @@ class ExcelExporter:
         """
         Export complete report with insights, profiling, and summary.
         """
-        os.makedirs(output_dir, exist_ok=True)
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{output_dir}/report_{run_id}_{timestamp}.xlsx"
+        filename = str(out / f"report_{run_id}_{timestamp}.xlsx")
         
         workbook = openpyxl.Workbook()
         workbook.remove(workbook.active)

@@ -9,7 +9,16 @@ from ipc.dashboard_ipc import (
     get_dashboard_layout_ipc,
 )
 from ipc.data_health_ipc import get_data_health_ipc
-from ipc.exports_ipc import get_exports_for_run_ipc, generate_export_ipc
+from ipc.exports_ipc import (
+    get_export_history_ipc,
+    generate_export_ipc,
+    export_insights_docx_ipc,
+    export_insights_pdf_ipc,
+    export_dashboard_pdf_ipc,
+    export_dashboard_json_ipc,
+    export_full_report_ipc,
+    open_export_file_ipc,
+)
 from ipc.explorer_ipc import get_explorer_data_ipc
 from ipc.file_dialog_ipc import select_file_ipc, select_directory_ipc
 
@@ -83,11 +92,17 @@ class FrontendAPI(QObject):
         return get_data_health_ipc(run_id)
 
     # -----------------------------
-    # Exports APIs
+    # Export APIs — All 7 handlers
     # -----------------------------
     @Slot(str, result=dict)
     def get_exports(self, run_id: str):
-        return get_exports_for_run_ipc(run_id)
+        """Legacy: get export history for a run."""
+        return get_export_history_ipc(run_id)
+
+    @Slot(str, result=dict)
+    def get_export_history(self, run_id: str):
+        """Get export history with file existence checks."""
+        return get_export_history_ipc(run_id)
 
     @Slot(str, str, str, str, result=dict)
     def generate_export(
@@ -97,8 +112,42 @@ class FrontendAPI(QObject):
         scope: str = "both",
         output_dir: str = "",
     ):
+        """Legacy: multi-purpose export handler."""
         return generate_export_ipc(run_id, export_type, scope, output_dir or None)
 
+    @Slot(str, result=dict)
+    def export_insights_docx(self, run_id: str):
+        """MODE 1: Generate DOCX insights report."""
+        return export_insights_docx_ipc(run_id)
+
+    @Slot(str, result=dict)
+    def export_insights_pdf(self, run_id: str):
+        """MODE 1: Generate PDF insights report."""
+        return export_insights_pdf_ipc(run_id)
+
+    @Slot(str, str, result=dict)
+    def export_dashboard_pdf(self, run_id: str, image_data_base64: str):
+        """MODE 2: Generate dashboard screenshot PDF."""
+        return export_dashboard_pdf_ipc(run_id, image_data_base64)
+
+    @Slot(str, result=dict)
+    def export_dashboard_json(self, run_id: str):
+        """MODE 3: Export dashboard blueprint as JSON."""
+        return export_dashboard_json_ipc(run_id)
+
+    @Slot(str, str, result=dict)
+    def export_full_report(self, run_id: str, image_data_base64: str):
+        """MODE 4: Generate full report PDF (insights + dashboard)."""
+        return export_full_report_ipc(run_id, image_data_base64)
+
+    @Slot(str, result=dict)
+    def open_export_file(self, file_path: str):
+        """Open exported file in OS default application."""
+        return open_export_file_ipc(file_path)
+
+    # -----------------------------
+    # Data Explorer APIs
+    # -----------------------------
     @Slot(str, int, result=dict)
     def get_explorer_data(self, run_id: str, limit: int = 500):
         return get_explorer_data_ipc(run_id, limit)

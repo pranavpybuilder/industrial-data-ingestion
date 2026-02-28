@@ -18,6 +18,16 @@ export interface IPCResponse<T = any> {
   success: boolean;
   data?: T;
   message?: string;
+  error?: string;
+}
+
+export interface ExportRecord {
+  export_id: string;
+  export_type: string;
+  scope: string;
+  file_path: string;
+  created_at: string;
+  file_exists?: boolean;
 }
 
 const hasBridge = (): boolean =>
@@ -95,7 +105,7 @@ const invokeBridge = async <T = any>(
           settled = true;
           reject(new Error(`No response from bridge method '${String(method)}'`));
         }
-      }, 8000);
+      }, 30000);
     } catch (error) {
       reject(error);
     }
@@ -232,6 +242,10 @@ export const frontendApi = {
     }
   },
 
+  // ─────────────────────────────────────────────
+  // Export APIs — Legacy
+  // ─────────────────────────────────────────────
+
   async getExports(runId: string): Promise<IPCResponse> {
     try {
       return await invokeBridge<IPCResponse>("get_exports", runId);
@@ -245,7 +259,7 @@ export const frontendApi = {
 
   async generateExport(
     runId: string,
-    exportType: "excel" | "pdf" | "csv",
+    exportType: "excel" | "pdf" | "docx",
     scope: "insights" | "dashboards" | "both",
     outputDir = ""
   ): Promise<IPCResponse> {
@@ -264,6 +278,130 @@ export const frontendApi = {
       };
     }
   },
+
+  // ─────────────────────────────────────────────
+  // Export APIs — New 7 handlers
+  // ─────────────────────────────────────────────
+
+  async getExportHistory(
+    runId: string
+  ): Promise<IPCResponse<{ exports: ExportRecord[] }>> {
+    try {
+      return await invokeBridge<IPCResponse<{ exports: ExportRecord[] }>>(
+        "get_export_history",
+        runId
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to get export history: ${error}`,
+      };
+    }
+  },
+
+  async exportInsightsDocx(
+    runId: string
+  ): Promise<IPCResponse<{ file_path: string }>> {
+    try {
+      return await invokeBridge<IPCResponse<{ file_path: string }>>(
+        "export_insights_docx",
+        runId
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `DOCX export failed: ${error}`,
+      };
+    }
+  },
+
+  async exportInsightsPdf(
+    runId: string
+  ): Promise<IPCResponse<{ file_path: string }>> {
+    try {
+      return await invokeBridge<IPCResponse<{ file_path: string }>>(
+        "export_insights_pdf",
+        runId
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `PDF export failed: ${error}`,
+      };
+    }
+  },
+
+  async exportDashboardPdf(
+    runId: string,
+    imageDataBase64: string
+  ): Promise<IPCResponse<{ file_path: string }>> {
+    try {
+      return await invokeBridge<IPCResponse<{ file_path: string }>>(
+        "export_dashboard_pdf",
+        runId,
+        imageDataBase64
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `Dashboard PDF export failed: ${error}`,
+      };
+    }
+  },
+
+  async exportDashboardJson(
+    runId: string
+  ): Promise<IPCResponse<{ file_path: string }>> {
+    try {
+      return await invokeBridge<IPCResponse<{ file_path: string }>>(
+        "export_dashboard_json",
+        runId
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `Dashboard JSON export failed: ${error}`,
+      };
+    }
+  },
+
+  async exportFullReport(
+    runId: string,
+    imageDataBase64: string
+  ): Promise<IPCResponse<{ file_path: string }>> {
+    try {
+      return await invokeBridge<IPCResponse<{ file_path: string }>>(
+        "export_full_report",
+        runId,
+        imageDataBase64
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `Full report export failed: ${error}`,
+      };
+    }
+  },
+
+  async openExportFile(
+    filePath: string
+  ): Promise<IPCResponse> {
+    try {
+      return await invokeBridge<IPCResponse>(
+        "open_export_file",
+        filePath
+      );
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to open file: ${error}`,
+      };
+    }
+  },
+
+  // ─────────────────────────────────────────────
+  // Explorer
+  // ─────────────────────────────────────────────
 
   async getExplorerData(runId: string, limit = 500): Promise<IPCResponse> {
     try {

@@ -17,6 +17,7 @@ Pipeline order:
 13. Mark run successful
 """
 
+import atexit
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -43,7 +44,7 @@ from rule_engine.maintenance_rules import (
     VibrationSpikeRule,
 )
 from rule_engine.threshold_engine import ThresholdEngine
-from storage.connection import initialize_database
+from storage.connection import close_connection, initialize_database
 from storage.repositories.dashboard_repo import DashboardRepository
 from storage.repositories.export_repo import ExportRepository
 from storage.repositories.feature_store_repo import FeatureStoreRepository
@@ -67,6 +68,10 @@ export_repo = ExportRepository()
 class PipelineRunner:
     def __init__(self) -> None:
         initialize_database()
+        # ── Register DB close on process exit ─────────────────────────────────
+        # This ensures the DuckDB file lock is ALWAYS released cleanly,
+        # even on crash, so the next launch never hits "file in use" error.
+        atexit.register(close_connection)
         logger.info("Pipeline runner initialized. Database ready.")
 
     def run_single_file(
@@ -391,6 +396,8 @@ class PipelineRunner:
 
         if normalized_source in {"sap", "report_excel"}:
             features = self._extract_sap_features(df)
+        elif normalized_source == "maintenance":
+            features = self._extract_maintenance_features(df)
         elif normalized_source == "energy":
             features = self._extract_energy_features(df)
         elif normalized_source == "rfid":
@@ -398,7 +405,15 @@ class PipelineRunner:
         elif normalized_source == "plc":
             features = self._extract_plc_features(df)
         else:
-            features = self._extract_generic_features(df, prefix=normalized_source or "generic")
+            # For generic_tabular and unknown sources:
+            # Try maintenance detection first (if columns suggest it)
+            maint_cols = {"breakdown_dur", "equipment", "malfunct_start", "breakdown"}
+            if maint_cols.intersection(set(df.columns)):
+                features = self._extract_maintenance_features(df)
+            else:
+                features = self._extract_generic_features(
+                    df, prefix=normalized_source or "generic"
+                )
 
         if features:
             return features
@@ -466,6 +481,131 @@ class PipelineRunner:
                 row.get("downtime_hours", 0.0),
                 iso_ts,
             )
+
+        return features
+
+    @staticmethod
+    def _extract_maintenance_features(df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Extract features from maintenance/breakdown datasets.
+
+        Handles Breakdown_data.csv columns:
+        - breakdown_dur: float — breakdown duration in minutes/hours
+        - equipment: int — equipment ID
+        - notification: int — notification number
+        - why1..why_5: text — 5-Why root cause chain
+        - due_to_1..due_to_5: text — due-to chain
+        - malfunct_start, created_on: datetime — timestamps
+        - breakdown: text — breakdown indicator
+        - coding_code_txt: text — failure coding
+        """
+        features: List[Dict[str, Any]] = []
+        if df.empty:
+            return features
+
+        timestamps = PipelineRunner._resolve_timestamps(df)
+
+        # ── Feature 1: Breakdown duration (numeric) ──
+        breakdown_dur = pd.to_numeric(
+            df.get("breakdown_dur", pd.Series([0.0] * len(df), index=df.index)),
+            errors="coerce",
+        ).fillna(0.0)
+
+        for idx in range(len(df)):
+            ts = PipelineRunner._as_timestamp(timestamps.iloc[idx])
+            PipelineRunner._append_feature(
+                features, "maint__breakdown_duration", breakdown_dur.iloc[idx], ts
+            )
+
+        # ── Feature 2: Breakdown count (1 per row) ──
+        for idx in range(len(df)):
+            ts = PipelineRunner._as_timestamp(timestamps.iloc[idx])
+            PipelineRunner._append_feature(
+                features, "maint__breakdown_count", 1.0, ts
+            )
+
+        # ── Feature 3: 5-Why completion score per row ──
+        # Score = (number of non-null why fields) / 5
+        why_cols = [c for c in df.columns if c.startswith("why") and c != "why_why_done_by"]
+        if why_cols:
+            for idx in range(len(df)):
+                ts = PipelineRunner._as_timestamp(timestamps.iloc[idx])
+                filled = sum(
+                    1 for c in why_cols
+                    if pd.notna(df[c].iloc[idx]) and str(df[c].iloc[idx]).strip() != ""
+                )
+                score = filled / max(len(why_cols), 1)
+                PipelineRunner._append_feature(
+                    features, "maint__why_completion_score", score, ts
+                )
+
+        # ── Feature 4: Due-to chain completion ──
+        due_to_cols = [c for c in df.columns if c.startswith("due_to")]
+        if due_to_cols:
+            for idx in range(len(df)):
+                ts = PipelineRunner._as_timestamp(timestamps.iloc[idx])
+                filled = sum(
+                    1 for c in due_to_cols
+                    if pd.notna(df[c].iloc[idx]) and str(df[c].iloc[idx]).strip() != ""
+                )
+                score = filled / max(len(due_to_cols), 1)
+                PipelineRunner._append_feature(
+                    features, "maint__due_to_completion_score", score, ts
+                )
+
+        # ── Feature 5: Equipment breakdown counts (per equipment) ──
+        if "equipment" in df.columns:
+            equipment_ids = pd.to_numeric(df["equipment"], errors="coerce")
+            for idx in range(len(df)):
+                ts = PipelineRunner._as_timestamp(timestamps.iloc[idx])
+                eq_id = equipment_ids.iloc[idx]
+                if pd.notna(eq_id):
+                    PipelineRunner._append_feature(
+                        features, f"maint__equip_{int(eq_id)}_breakdown", 1.0, ts
+                    )
+
+        # ── Feature 6: Daily aggregates ──
+        if timestamps.notna().any():
+            daily_frame = pd.DataFrame({
+                "ts": timestamps,
+                "breakdown_dur": breakdown_dur,
+                "count": 1,
+            }).dropna(subset=["ts"])
+
+            if not daily_frame.empty:
+                daily = daily_frame.set_index("ts").resample("D").agg({
+                    "breakdown_dur": "sum",
+                    "count": "sum",
+                })
+                for ts_val, row in daily.iterrows():
+                    iso_ts = PipelineRunner._as_timestamp(ts_val)
+                    PipelineRunner._append_feature(
+                        features,
+                        "maint_daily__breakdown_duration",
+                        row.get("breakdown_dur", 0.0),
+                        iso_ts,
+                    )
+                    PipelineRunner._append_feature(
+                        features,
+                        "maint_daily__breakdown_count",
+                        row.get("count", 0.0),
+                        iso_ts,
+                    )
+
+        # ── Feature 7: All remaining numeric columns as generic features ──
+        numeric_cols = sorted(
+            c for c in df.select_dtypes(include=["number"]).columns
+            if c not in {"breakdown_dur"}
+        )
+        for idx in range(len(df)):
+            ts = PipelineRunner._as_timestamp(timestamps.iloc[idx])
+            for col in numeric_cols:
+                PipelineRunner._append_feature(
+                    features,
+                    f"maint__{col}",
+                    df[col].iloc[idx],
+                    ts,
+                )
 
         return features
 
@@ -607,18 +747,35 @@ class PipelineRunner:
 
     @staticmethod
     def _resolve_timestamps(df: pd.DataFrame) -> pd.Series:
+        """Resolve the best timestamp column from the DataFrame."""
         for candidate in [
             "event_time",
+            "created_on",
             "start_date",
+            "malfunct_start",
             "report_date",
             "date",
-            "created_on",
             "timestamp",
+            "changed_on",
+            "malfunct_end",
+            "malfunction_end",
+            "mal_start_t",
+            "order_date",
             "aligned_time",
         ]:
             if candidate not in df.columns:
                 continue
-            return pd.to_datetime(df[candidate], errors="coerce", utc=True)
+            parsed = pd.to_datetime(df[candidate], errors="coerce", utc=True)
+            if parsed.notna().sum() > 0:
+                return parsed
+
+        # Fallback: find any column with 'date' or 'time' in the name
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if any(token in col_lower for token in ("date", "time")):
+                parsed = pd.to_datetime(df[col], errors="coerce", utc=True)
+                if parsed.notna().sum() > 0:
+                    return parsed
 
         return pd.Series([pd.NaT] * len(df), index=df.index)
 
@@ -863,7 +1020,6 @@ class PipelineRunner:
         profiling_results: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         try:
-            from export.csv_exporter import CSVExporter
             from export.excel_exporter import ExcelExporter
             from export.pdf_exporter import PDFExporter
         except ModuleNotFoundError as exc:
@@ -884,15 +1040,8 @@ class PipelineRunner:
             profiling_results=export_profiling_payload,
         )
 
-        pdf_exporter = PDFExporter(logger=logger)
-        export_files["pdf_report"] = pdf_exporter.export_comprehensive_report(
-            run_id=run_id,
-            unified_insights=unified_insights,
-            profiling_results=export_profiling_payload,
-        )
-
-        csv_exporter = CSVExporter(logger=logger)
-        export_files["csv_files"] = csv_exporter.export_batch(
+        pdf_exporter = PDFExporter()
+        export_files["pdf_report"] = pdf_exporter.export_insights_pdf(
             run_id=run_id,
             unified_insights=unified_insights,
             profiling_results=export_profiling_payload,

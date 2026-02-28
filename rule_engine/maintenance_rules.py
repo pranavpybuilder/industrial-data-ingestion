@@ -391,3 +391,305 @@ class RFIDConnectivityRule(RuleBase):
             confidence=confidence,
             severity=severity,
         )
+
+
+class RepeatFailureRule(RuleBase):
+    """
+    Trigger when the same equipment has repeated breakdowns within a time window.
+
+    Specifically designed for Breakdown_data.csv where:
+    - equipment column identifies the asset
+    - breakdown_dur or breakdown column indicates an event
+    - Multiple rows for the same equipment = repeat failure
+
+    Config:
+        min_repeats: minimum number of breakdowns per equipment to trigger (default: 2)
+    """
+
+    def __init__(self, min_repeats: int = 2):
+        super().__init__(
+            name="RepeatEquipmentFailure",
+            rule_id="rule_repeat_failure",
+            severity="warning",
+            default_confidence=0.88,
+        )
+        self.min_repeats = min_repeats
+
+    def evaluate(self, data: Dict[str, Any]) -> RuleResult:
+        """Check for repeated breakdowns on the same equipment."""
+
+        equipment_counts = data.get("equipment_breakdown_counts", {})
+        profile = data.get("profile", {})
+
+        # Also check features for maint__equip_*_breakdown
+        features = data.get("features", [])
+        if not equipment_counts and features:
+            equip_features = [
+                f for f in features
+                if isinstance(f, dict) and "equip_" in str(f.get("feature_name", ""))
+                and "breakdown" in str(f.get("feature_name", ""))
+            ]
+            for ef in equip_features:
+                name = ef.get("feature_name", "")
+                # Extract equipment ID from "maint__equip_12345_breakdown"
+                parts = name.split("__equip_")
+                if len(parts) == 2:
+                    eq_id = parts[1].replace("_breakdown", "")
+                    equipment_counts[eq_id] = equipment_counts.get(eq_id, 0) + 1
+
+        if not equipment_counts:
+            return self._not_triggered_result(self, [])
+
+        repeat_offenders = {
+            eq_id: count for eq_id, count in equipment_counts.items()
+            if count >= self.min_repeats
+        }
+
+        triggered = len(repeat_offenders) > 0
+
+        if triggered:
+            worst_eq = max(repeat_offenders, key=repeat_offenders.get)
+            worst_count = repeat_offenders[worst_eq]
+            severity = "critical" if worst_count >= 5 else "warning"
+            message = (
+                f"{len(repeat_offenders)} equipment(s) with repeat failures. "
+                f"Worst: Equipment {worst_eq} ({worst_count} breakdowns)"
+            )
+            remediation = (
+                f"Investigate Equipment {worst_eq} for root cause. "
+                f"{worst_count} breakdowns suggest systemic issue. "
+                "Consider replacement or overhaul."
+            )
+            confidence = min(0.98, 0.80 + worst_count * 0.03)
+        else:
+            message = "No repeat equipment failures detected"
+            remediation = "No action required"
+            severity = "info"
+            confidence = 0.85
+
+        return self._create_result(
+            triggered=triggered,
+            message=message,
+            remediation=remediation,
+            affected_columns=["equipment", "breakdown_dur"],
+            data={
+                "repeat_offenders": repeat_offenders,
+                "total_equipment_with_failures": len(equipment_counts),
+                "min_repeats_threshold": self.min_repeats,
+            },
+            confidence=confidence,
+            severity=severity,
+        )
+
+
+class HighMTTRRule(RuleBase):
+    """
+    Trigger when Mean Time To Repair (MTTR) is abnormally high.
+
+    Uses breakdown_dur column from Breakdown_data.csv.
+    Detects outliers using IQR (interquartile range) method:
+    - High MTTR = breakdown_dur > Q3 + 1.5 * IQR
+
+    This finds equipment/events that took unusually long to repair.
+    """
+
+    def __init__(self, iqr_multiplier: float = 1.5):
+        super().__init__(
+            name="HighMTTR",
+            rule_id="rule_high_mttr",
+            severity="warning",
+            default_confidence=0.85,
+        )
+        self.iqr_multiplier = iqr_multiplier
+
+    def evaluate(self, data: Dict[str, Any]) -> RuleResult:
+        """Check for abnormally high breakdown durations."""
+
+        profile = data.get("profile", {})
+        features = data.get("features", [])
+
+        # Get breakdown_dur statistics from profile
+        dur_profile = profile.get("breakdown_dur", {})
+
+        if not dur_profile:
+            # Try to find in features
+            dur_values = [
+                f.get("feature_value", 0) for f in features
+                if isinstance(f, dict) and "breakdown_duration" in str(f.get("feature_name", ""))
+            ]
+            if not dur_values or len(dur_values) < 3:
+                return self._not_triggered_result(self, [])
+
+            import numpy as np
+            q1 = float(np.percentile(dur_values, 25))
+            q3 = float(np.percentile(dur_values, 75))
+            iqr = q3 - q1
+            mean_dur = float(np.mean(dur_values))
+            max_dur = float(np.max(dur_values))
+            upper_fence = q3 + self.iqr_multiplier * iqr
+            outlier_count = sum(1 for v in dur_values if v > upper_fence)
+        else:
+            q1 = dur_profile.get("q1", dur_profile.get("percentile_25", 0))
+            q3 = dur_profile.get("q3", dur_profile.get("percentile_75", 0))
+            iqr = q3 - q1
+            mean_dur = dur_profile.get("mean", 0)
+            max_dur = dur_profile.get("max", 0)
+            upper_fence = q3 + self.iqr_multiplier * iqr
+            outlier_count = dur_profile.get("outlier_count", 0)
+            if outlier_count == 0 and max_dur > upper_fence:
+                outlier_count = 1
+
+        triggered = outlier_count > 0 and upper_fence > 0
+
+        if triggered:
+            message = (
+                f"High MTTR detected: {outlier_count} breakdown(s) exceed "
+                f"{upper_fence:.1f} hrs (IQR fence). Max: {max_dur:.1f} hrs, Avg: {mean_dur:.1f} hrs"
+            )
+            remediation = (
+                "Investigate long-duration breakdowns for process improvement. "
+                "Consider spare parts pre-staging, technician training, or equipment redesign."
+            )
+            severity = "critical" if max_dur > upper_fence * 2 else "warning"
+            confidence = min(0.95, 0.80 + outlier_count * 0.03)
+        else:
+            message = f"MTTR within normal range: avg {mean_dur:.1f} hrs"
+            remediation = "No action required"
+            severity = "info"
+            confidence = 0.82
+
+        return self._create_result(
+            triggered=triggered,
+            message=message,
+            remediation=remediation,
+            affected_columns=["breakdown_dur"],
+            data={
+                "mean_duration": mean_dur,
+                "max_duration": max_dur,
+                "q1": q1,
+                "q3": q3,
+                "iqr": iqr,
+                "upper_fence": upper_fence,
+                "outlier_count": outlier_count,
+            },
+            confidence=confidence,
+            severity=severity,
+        )
+
+
+class FailureEscalationRule(RuleBase):
+    """
+    Trigger when failure frequency is increasing over time.
+
+    Compares failure count in recent window vs. older window.
+    If recent_count / older_count > escalation_threshold, it triggers.
+
+    Works with timestamped breakdown data (created_on, malfunct_start).
+    """
+
+    def __init__(self, escalation_threshold: float = 1.5, window_days: int = 30):
+        super().__init__(
+            name="FailureEscalation",
+            rule_id="rule_failure_escalation",
+            severity="warning",
+            default_confidence=0.82,
+        )
+        self.escalation_threshold = escalation_threshold  # 50% increase
+        self.window_days = window_days
+
+    def evaluate(self, data: Dict[str, Any]) -> RuleResult:
+        """Check if failure frequency is escalating."""
+
+        features = data.get("features", [])
+        timestamps = data.get("breakdown_timestamps", [])
+
+        # Try to build timestamp list from features
+        if not timestamps and features:
+            timestamps = [
+                f.get("timestamp") for f in features
+                if isinstance(f, dict)
+                and "breakdown" in str(f.get("feature_name", ""))
+                and f.get("timestamp")
+            ]
+
+        if len(timestamps) < 4:
+            return self._not_triggered_result(self, [])
+
+        # Parse timestamps
+        from datetime import datetime as dt_class
+        parsed_dates = []
+        for ts in timestamps:
+            if ts is None:
+                continue
+            try:
+                if isinstance(ts, str):
+                    parsed = dt_class.fromisoformat(ts.replace("Z", "+00:00"))
+                else:
+                    parsed = ts
+                parsed_dates.append(parsed)
+            except (ValueError, TypeError):
+                continue
+
+        if len(parsed_dates) < 4:
+            return self._not_triggered_result(self, [])
+
+        parsed_dates.sort()
+
+        # Split into two halves: older and recent
+        midpoint = len(parsed_dates) // 2
+        older_count = midpoint
+        recent_count = len(parsed_dates) - midpoint
+
+        # Calculate time spans
+        older_span_days = max(
+            (parsed_dates[midpoint - 1] - parsed_dates[0]).days, 1
+        )
+        recent_span_days = max(
+            (parsed_dates[-1] - parsed_dates[midpoint]).days, 1
+        )
+
+        # Normalize to daily rates
+        older_rate = older_count / older_span_days
+        recent_rate = recent_count / recent_span_days
+
+        if older_rate > 0:
+            escalation_ratio = recent_rate / older_rate
+        else:
+            escalation_ratio = recent_rate * 10 if recent_rate > 0 else 0
+
+        triggered = escalation_ratio > self.escalation_threshold
+
+        if triggered:
+            pct_increase = (escalation_ratio - 1.0) * 100
+            message = (
+                f"Failure rate escalating: {pct_increase:.0f}% increase. "
+                f"Recent: {recent_rate:.2f}/day vs. Earlier: {older_rate:.2f}/day"
+            )
+            remediation = (
+                "Failure frequency is rising. Investigate systemic causes: "
+                "aging equipment, environmental conditions, or operational changes."
+            )
+            severity = "critical" if escalation_ratio > 2.0 else "warning"
+            confidence = min(0.95, 0.75 + escalation_ratio * 0.05)
+        else:
+            message = f"Failure rate stable: {recent_rate:.2f}/day"
+            remediation = "No action required"
+            severity = "info"
+            confidence = 0.80
+
+        return self._create_result(
+            triggered=triggered,
+            message=message,
+            remediation=remediation,
+            affected_columns=["breakdown_dur", "created_on"],
+            data={
+                "older_count": older_count,
+                "recent_count": recent_count,
+                "older_rate_per_day": round(older_rate, 4),
+                "recent_rate_per_day": round(recent_rate, 4),
+                "escalation_ratio": round(escalation_ratio, 3),
+                "threshold": self.escalation_threshold,
+            },
+            confidence=confidence,
+            severity=severity,
+        )

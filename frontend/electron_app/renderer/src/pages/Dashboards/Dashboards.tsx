@@ -1,4 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+/**
+ * Dashboards.tsx — Power BI-style dashboard page
+ * ------------------------------------------------
+ * Features:
+ *  - Left sidebar filter panel (collapsible)
+ *  - Section-grouped widget grid (12-col)
+ *  - KPI / Chart / Table widget cards
+ *  - Drag-and-drop reorder with ghost feedback
+ *  - Drill-down side panel (not raw JSON)
+ *  - Skeleton loader
+ *  - Undo-friendly layout with Save
+ *  - lastSaved timestamp shown in header via dashboardsUI.getLastSaved()
+ */
+
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FiDownload,
@@ -9,6 +23,13 @@ import {
   FiSliders,
   FiTarget,
   FiX,
+  FiChevronLeft,
+  FiChevronRight,
+  FiBarChart2,
+  FiTrendingUp,
+  FiTrendingDown,
+  FiMinus,
+  FiGrid,
 } from "react-icons/fi";
 import {
   ResponsiveContainer,
@@ -16,14 +37,25 @@ import {
   Line,
   BarChart,
   Bar,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   Tooltip,
   CartesianGrid,
+  Legend,
 } from "recharts";
 
 import { useRunUI } from "../../state/useRunUI";
 import { frontendApi } from "../../services/frontendApi";
+// ── CHANGE 1: import dashboardsUI store + useDashboardsUI hook ──────────────
+import { dashboardsUI } from "../../state/dashboards_ui_store";
+import { useDashboardsUI } from "../../state/useDashboardsUI";
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 type DashboardWidget = {
   id: string;
@@ -35,6 +67,9 @@ type DashboardWidget = {
   description?: string;
   metrics?: Record<string, any>;
   data?: any;
+  unit?: string;
+  trend?: "up" | "down" | "flat";
+  trendValue?: string;
 };
 
 type DashboardSection = {
@@ -51,10 +86,12 @@ type DashboardState = {
   metadata?: Record<string, any>;
 };
 
+type VisualType = "line" | "area" | "bar" | "pie" | "table" | "metric";
+
 type UserLayout = {
   layout_version: number;
   widget_order: string[];
-  widget_visuals: Record<string, string>;
+  widget_visuals: Record<string, VisualType>;
   hidden_widgets: string[];
   slicers: {
     machine: string;
@@ -68,16 +105,32 @@ const DEFAULT_LAYOUT: UserLayout = {
   widget_order: [],
   widget_visuals: {},
   hidden_widgets: [],
-  slicers: {
-    machine: "all",
-    failureType: "all",
-    timeRange: "all",
-  },
+  slicers: { machine: "all", failureType: "all", timeRange: "all" },
 };
+
+const CHART_COLORS = [
+  "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6",
+  "#f59e0b", "#3b82f6", "#10b981", "#ef4444",
+];
+
+const TOOLTIP_STYLE: React.CSSProperties = {
+  borderRadius: 10,
+  border: "1px solid #e5e7eb",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+  fontSize: 12,
+  background: "#fff",
+};
+
+const AXIS_STYLE = { fontSize: 11, fill: "#9ca3af" };
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 const Dashboards = () => {
   const navigate = useNavigate();
   const run = useRunUI();
+
+  // ── CHANGE 2: subscribe to store so lastSaved re-renders when markSaved() fires
+  const uiState = useDashboardsUI();
 
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
   const [layout, setLayout] = useState<UserLayout>(DEFAULT_LAYOUT);
@@ -85,8 +138,13 @@ const Dashboards = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
-  const [draggingWidgetId, setDraggingWidgetId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [drillWidgetId, setDrillWidgetId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadDashboard = async () => {
     if (!run.activeRunId) return;
@@ -104,29 +162,23 @@ const Dashboards = () => {
       return;
     }
 
-    const nextState = response.data?.dashboard_state || null;
+    const nextState: DashboardState = response.data?.dashboard_state || null;
     setDashboard(nextState);
-    if (response.message) {
-      setMessage(response.message);
-    }
+    if (response.message) setMessage(response.message);
 
     const widgets = extractWidgets(nextState);
     const savedLayout = response.data?.user_layout?.user_saved_layout;
-    const normalized = normalizeLayout(savedLayout, widgets.map((w) => w.id));
-    setLayout(normalized);
+    setLayout(normalizeLayout(savedLayout, widgets.map((w) => w.id)));
   };
 
-  useEffect(() => {
-    loadDashboard();
-  }, [run.activeRunId]);
+  useEffect(() => { loadDashboard(); }, [run.activeRunId]);
+
+  // ── Derived state ─────────────────────────────────────────────────────────
 
   const allWidgets = useMemo(() => extractWidgets(dashboard), [dashboard]);
-
   const widgetsById = useMemo(() => {
     const out: Record<string, DashboardWidget> = {};
-    for (const widget of allWidgets) {
-      out[widget.id] = widget;
-    }
+    for (const w of allWidgets) out[w.id] = w;
     return out;
   }, [allWidgets]);
 
@@ -143,12 +195,10 @@ const Dashboards = () => {
 
   const rowsForSlicers = useMemo(() => {
     const rows: Record<string, any>[] = [];
-    for (const widget of allWidgets) {
-      if (Array.isArray(widget.data)) {
-        for (const entry of widget.data) {
-          if (entry && typeof entry === "object") {
-            rows.push(entry as Record<string, any>);
-          }
+    for (const w of allWidgets) {
+      if (Array.isArray(w.data)) {
+        for (const entry of w.data) {
+          if (entry && typeof entry === "object") rows.push(entry);
         }
       }
     }
@@ -159,343 +209,606 @@ const Dashboards = () => {
     () => uniqueValues(rowsForSlicers, ["equipment_id", "resource", "machine_name"]),
     [rowsForSlicers]
   );
-
   const failureTypeOptions = useMemo(
     () => uniqueValues(rowsForSlicers, ["failure_type", "event_type", "title"]),
     [rowsForSlicers]
   );
 
+  // Group visible widgets into sections
+  const sectionGroups = useMemo(() => {
+    if (!dashboard?.sections?.length) {
+      return [{ id: "__all__", title: "", widgets: visibleWidgetIds }];
+    }
+    const groups: { id: string; title: string; widgets: string[] }[] = [];
+    for (const sec of dashboard.sections) {
+      const ids = visibleWidgetIds.filter((id) => {
+        const found = allWidgets.find((w) => w.id === id);
+        // Try to match section by iterating original sections
+        const origSec = dashboard.sections?.find((s) => s.id === sec.id);
+        return origSec?.widgets?.some((sw) => String(sw.id) === id);
+      });
+      if (ids.length) groups.push({ id: sec.id, title: sec.title, widgets: ids });
+    }
+    // Orphan widgets not matched to any section
+    const assignedIds = new Set(groups.flatMap((g) => g.widgets));
+    const orphans = visibleWidgetIds.filter((id) => !assignedIds.has(id));
+    if (orphans.length) groups.push({ id: "__orphans__", title: "Other", widgets: orphans });
+    return groups.length ? groups : [{ id: "__all__", title: "", widgets: visibleWidgetIds }];
+  }, [dashboard, visibleWidgetIds, allWidgets]);
+
+  // ── lastSaved: formatted relative timestamp from store ────────────────────
+
+  const lastSavedDisplay = useMemo(() => {
+    const ts = uiState.lastSaved;
+    if (!ts) return null;
+    return formatTimestamp(ts);
+  }, [uiState.lastSaved]);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
   const saveLayout = async () => {
     if (!run.activeRunId || !dashboard) return;
-
-    const payload: UserLayout = {
-      ...layout,
-      widget_order: orderedWidgetIds,
-    };
+    const payload = { ...layout, widget_order: orderedWidgetIds };
     const response = await frontendApi.saveDashboardLayout(
       run.activeRunId,
       dashboard.blueprint_id || "",
       payload
     );
     if (!response.success) {
-      setError(response.message || "Failed to save dashboard layout");
+      setError(response.message || "Failed to save");
       return;
     }
-    setMessage(response.message || "Dashboard layout saved");
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+    // ── CHANGE 3: mark saved in store → updates lastSaved → re-renders timestamp
+    dashboardsUI.markSaved();
   };
 
-  const updateSlicer = (
-    key: keyof UserLayout["slicers"],
-    value: string
-  ) => {
-    setLayout((prev) => ({
-      ...prev,
-      slicers: { ...prev.slicers, [key]: value },
-    }));
+  const updateSlicer = (key: keyof UserLayout["slicers"], value: string) => {
+    setLayout((prev) => ({ ...prev, slicers: { ...prev.slicers, [key]: value } }));
   };
+  const resetSlicers = () => setLayout((prev) => ({ ...prev, slicers: { ...DEFAULT_LAYOUT.slicers } }));
 
-  const resetSlicers = () => {
-    setLayout((prev) => ({
-      ...prev,
-      slicers: { ...DEFAULT_LAYOUT.slicers },
-    }));
-  };
-
-  const toggleHidden = (widgetId: string) => {
+  const toggleHidden = (id: string) => {
     setLayout((prev) => {
-      const hidden = prev.hidden_widgets.includes(widgetId)
-        ? prev.hidden_widgets.filter((id) => id !== widgetId)
-        : [...prev.hidden_widgets, widgetId];
+      const hidden = prev.hidden_widgets.includes(id)
+        ? prev.hidden_widgets.filter((h) => h !== id)
+        : [...prev.hidden_widgets, id];
       return { ...prev, hidden_widgets: hidden };
     });
   };
 
-  const setVisual = (widgetId: string, visualType: string) => {
-    setLayout((prev) => ({
-      ...prev,
-      widget_visuals: {
-        ...prev.widget_visuals,
-        [widgetId]: visualType,
-      },
-    }));
+  const setVisual = (id: string, vt: VisualType) => {
+    setLayout((prev) => ({ ...prev, widget_visuals: { ...prev.widget_visuals, [id]: vt } }));
   };
 
   const reorderWidgets = (fromId: string, toId: string) => {
     setLayout((prev) => {
       const order = [...orderedWidgetIds];
-      const fromIndex = order.indexOf(fromId);
-      const toIndex = order.indexOf(toId);
-      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
-        return prev;
-      }
-      const [moved] = order.splice(fromIndex, 1);
-      order.splice(toIndex, 0, moved);
+      const fromIdx = order.indexOf(fromId);
+      const toIdx = order.indexOf(toId);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return prev;
+      const [moved] = order.splice(fromIdx, 1);
+      order.splice(toIdx, 0, moved);
       return { ...prev, widget_order: order };
     });
   };
 
+  // ── Empty / loading states ────────────────────────────────────────────────
+
   if (!run.activeRunId) {
     return (
-      <section>
-        <h1>Dashboards</h1>
-        <p>No active run selected.</p>
+      <section style={s.page}>
+        <div style={s.emptyState}>
+          <FiGrid size={48} color="#d1d5db" />
+          <h2 style={{ margin: "16px 0 8px", color: "#374151" }}>No Active Run</h2>
+          <p style={{ color: "#9ca3af", margin: 0 }}>Select a run from the sidebar to view its dashboard.</p>
+        </div>
       </section>
     );
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <section style={styles.page}>
-      <div style={styles.headerRow}>
-        <div>
-          <h1 style={styles.title}>{run.activeRunId}</h1>
-          <span style={styles.subtitle}>Blueprint + saved user layout</span>
+    <section style={s.page}>
+      {/* ── Top bar ── */}
+      <header style={s.topBar}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button style={s.iconBtn} onClick={() => setSidebarOpen((v) => !v)} title="Toggle filters">
+            {sidebarOpen ? <FiChevronLeft size={16} /> : <FiSliders size={16} />}
+          </button>
+          <div>
+            <h1 style={s.pageTitle}>{run.activeRunId}</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
+              {dashboard?.metadata?.title && (
+                <span style={s.pageSubtitle}>{dashboard.metadata.title}</span>
+              )}
+              {/* ── lastSaved timestamp — only visible after first save ── */}
+              {lastSavedDisplay && (
+                <span style={s.savedTimestamp}>
+                  Saved {lastSavedDisplay}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div style={styles.actionsRow}>
-          <button style={styles.btn} onClick={loadDashboard}>
-            <FiRefreshCw size={14} /> Refresh
+        <div style={s.actionsRow}>
+          <button style={s.btn} onClick={loadDashboard}><FiRefreshCw size={13} /> Refresh</button>
+          <button
+            style={{ ...s.btn, ...(editMode ? s.btnActive : {}) }}
+            onClick={() => setEditMode((v) => !v)}
+          >
+            <FiMove size={13} /> {editMode ? "Exit Edit" : "Edit Layout"}
           </button>
           <button
-            style={styles.btn}
-            onClick={() => setEditMode((prev) => !prev)}
+            style={{ ...s.btn, ...(saveSuccess ? s.btnSuccess : {}) }}
+            onClick={saveLayout}
           >
-            <FiMove size={14} /> {editMode ? "Exit Edit" : "Edit Layout"}
+            <FiSave size={13} /> {saveSuccess ? "Saved!" : "Save"}
           </button>
-          <button style={styles.btn} onClick={saveLayout}>
-            <FiSave size={14} /> Save Dashboard
-          </button>
-          <button style={styles.btn} onClick={() => navigate("/insights")}>
-            <FiEye size={14} /> Show Insights
-          </button>
-          <button style={styles.btn} onClick={() => navigate("/exports")}>
-            <FiDownload size={14} /> Export
-          </button>
+          <button style={s.btn} onClick={() => navigate("/insights")}><FiEye size={13} /> Insights</button>
+          <button style={s.btn} onClick={() => navigate("/exports")}><FiDownload size={13} /> Export</button>
         </div>
+      </header>
+
+      {/* ── Status banners ── */}
+      {error && <div style={{ ...s.banner, ...s.bannerError }}>{error}</div>}
+      {!error && message && <div style={s.banner}>{message}</div>}
+
+      {/* ── Body (sidebar + canvas) ── */}
+      <div style={s.body}>
+        {/* Sidebar */}
+        {sidebarOpen && (
+          <aside style={s.sidebar}>
+            <div style={s.sidebarTitle}><FiSliders size={14} /> Filters</div>
+
+            <label style={s.filterLabel}>
+              Machine
+              <select style={s.select} value={layout.slicers.machine}
+                onChange={(e) => updateSlicer("machine", e.target.value)}>
+                <option value="all">All Machines</option>
+                {machineOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+
+            <label style={s.filterLabel}>
+              Failure Type
+              <select style={s.select} value={layout.slicers.failureType}
+                onChange={(e) => updateSlicer("failureType", e.target.value)}>
+                <option value="all">All Types</option>
+                {failureTypeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </label>
+
+            <label style={s.filterLabel}>
+              Time Range
+              <select style={s.select} value={layout.slicers.timeRange}
+                onChange={(e) => updateSlicer("timeRange", e.target.value as UserLayout["slicers"]["timeRange"])}>
+                <option value="all">All Time</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="90d">Last 90 Days</option>
+              </select>
+            </label>
+
+            <button style={s.resetBtn} onClick={resetSlicers}>Reset Filters</button>
+
+            {layout.hidden_widgets.length > 0 && (
+              <div style={s.hiddenList}>
+                <div style={s.hiddenListTitle}>Hidden</div>
+                {layout.hidden_widgets.map((id) => (
+                  <div key={id} style={s.hiddenChip}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {widgetsById[id]?.title || id}
+                    </span>
+                    <button style={s.chipBtn} onClick={() => toggleHidden(id)}>
+                      <FiEye size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
+        )}
+
+        {/* Canvas */}
+        <main id="dashboard-canvas" data-dashboard-root style={s.canvas}>
+          {loading && <SkeletonGrid />}
+
+          {!loading && !error && !dashboard && (
+            <div style={s.emptyState}>
+              <FiBarChart2 size={48} color="#d1d5db" />
+              <h3 style={{ margin: "16px 0 8px", color: "#374151" }}>No Dashboard Found</h3>
+              <p style={{ color: "#9ca3af", margin: 0 }}>No blueprint exists for this run yet.</p>
+            </div>
+          )}
+
+          {!loading && !error && dashboard && sectionGroups.map((group) => (
+            <div key={group.id} style={{ marginBottom: 28 }}>
+              {group.title && (
+                <div style={s.sectionHeader}>
+                  <span>{group.title}</span>
+                  <div style={s.sectionDivider} />
+                </div>
+              )}
+              <div style={s.widgetGrid}>
+                {group.widgets.map((widgetId) => {
+                  const widget = widgetsById[widgetId];
+                  if (!widget) return null;
+                  const visualType = layout.widget_visuals[widgetId] ?? autoVisualType(widget);
+                  const filteredData = applySlicers(widget.data, layout.slicers);
+                  const isDraggingOver = dragOverId === widgetId && draggingId !== widgetId;
+
+                  return (
+                    <div
+                      key={widgetId}
+                      style={{
+                        ...widgetCardStyle(widget),
+                        ...(isDraggingOver ? s.cardDragOver : {}),
+                        ...(draggingId === widgetId ? s.cardDragging : {}),
+                        gridColumn: `span ${widgetGridSpan(widget)}`,
+                      }}
+                      draggable={editMode}
+                      onDragStart={(e) => {
+                        setDraggingId(widgetId);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => { e.preventDefault(); setDragOverId(widgetId); }}
+                      onDragLeave={() => setDragOverId(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (draggingId) reorderWidgets(draggingId, widgetId);
+                        setDraggingId(null);
+                        setDragOverId(null);
+                      }}
+                      onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
+                    >
+                      {/* Card header */}
+                      <div style={s.cardHeader}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                          {editMode && <FiMove size={13} color="#9ca3af" style={{ flexShrink: 0 }} />}
+                          <span style={s.cardTitle}>
+                            {widget.title || widget.subtitle || widgetId}
+                          </span>
+                          {widget.severity && (
+                            <span style={severityBadge(widget.severity)}>{widget.severity}</span>
+                          )}
+                        </div>
+                        <div style={s.cardActions}>
+                          {canSwitchVisual(widget) && (
+                            <select
+                              style={s.vizSelect}
+                              value={visualType}
+                              onChange={(e) => setVisual(widgetId, e.target.value as VisualType)}
+                            >
+                              {allowedVisuals(widget).map((vt) => (
+                                <option key={vt} value={vt}>{vt.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          )}
+                          <button style={s.iconBtn} title="Drill down" onClick={() => setDrillWidgetId(widgetId)}>
+                            <FiTarget size={13} />
+                          </button>
+                          {editMode && (
+                            <button style={s.iconBtn} title="Hide widget" onClick={() => toggleHidden(widgetId)}>
+                              <FiX size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card body */}
+                      <div style={s.cardBody}>
+                        <WidgetContent
+                          widget={widget}
+                          visualType={visualType}
+                          filteredData={filteredData}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </main>
       </div>
 
-      {loading && <div style={styles.infoCard}>Loading dashboard...</div>}
-      {error && <div style={{ ...styles.infoCard, ...styles.errorCard }}>{error}</div>}
-      {!error && message && <div style={styles.infoCard}>{message}</div>}
-
-      {!loading && !error && !dashboard && (
-        <div style={styles.infoCard}>
-          No dashboard blueprint found for this run.
-        </div>
-      )}
-
-      {!loading && !error && dashboard && (
-        <>
-          <div style={styles.filterPanel}>
-            <div style={styles.filterTitle}>
-              <FiSliders size={15} /> Filter Panel / Slicers
-            </div>
-            <div style={styles.filterGrid}>
-              <label style={styles.filterLabel}>
-                Machine
-                <select
-                  title="Machine slicer"
-                  value={layout.slicers.machine}
-                  onChange={(event) => updateSlicer("machine", event.target.value)}
-                  style={styles.select}
-                >
-                  <option value="all">All Machines</option>
-                  {machineOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={styles.filterLabel}>
-                Failure Type
-                <select
-                  title="Failure type slicer"
-                  value={layout.slicers.failureType}
-                  onChange={(event) => updateSlicer("failureType", event.target.value)}
-                  style={styles.select}
-                >
-                  <option value="all">All Failure Types</option>
-                  {failureTypeOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={styles.filterLabel}>
-                Time Range
-                <select
-                  title="Time range slicer"
-                  value={layout.slicers.timeRange}
-                  onChange={(event) =>
-                    updateSlicer(
-                      "timeRange",
-                      event.target.value as UserLayout["slicers"]["timeRange"]
-                    )
-                  }
-                  style={styles.select}
-                >
-                  <option value="all">All Time</option>
-                  <option value="7d">Last 7 Days</option>
-                  <option value="30d">Last 30 Days</option>
-                  <option value="90d">Last 90 Days</option>
-                </select>
-              </label>
-            </div>
-            <button style={styles.smallBtn} onClick={resetSlicers}>
-              Reset Filters
-            </button>
-          </div>
-
-          <div style={styles.widgetGrid}>
-            {visibleWidgetIds.map((widgetId) => {
-              const widget = widgetsById[widgetId];
-              const visualType = layout.widget_visuals[widgetId] || defaultVisual(widget);
-              const filteredData = applySlicers(
-                widget?.data,
-                layout.slicers
-              );
-              return (
-                <article
-                  key={widgetId}
-                  style={styles.widgetCard}
-                  draggable={editMode}
-                  onDragStart={(event) => {
-                    if (!editMode) return;
-                    setDraggingWidgetId(widgetId);
-                    event.dataTransfer.effectAllowed = "move";
-                  }}
-                  onDragOver={(event) => {
-                    if (!editMode) return;
-                    event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    if (!editMode || !draggingWidgetId) return;
-                    event.preventDefault();
-                    reorderWidgets(draggingWidgetId, widgetId);
-                    setDraggingWidgetId(null);
-                  }}
-                >
-                  <div style={styles.widgetHeader}>
-                    <div>
-                      <h3 style={styles.widgetTitle}>
-                        {widget?.title || widget?.subtitle || widget?.id || "Widget"}
-                      </h3>
-                      {widget?.severity && (
-                        <span style={severityBadge(widget.severity)}>{widget.severity}</span>
-                      )}
-                    </div>
-                    <div style={styles.widgetActions}>
-                      <select
-                        title="Chart type switcher"
-                        value={visualType}
-                        onChange={(event) => setVisual(widgetId, event.target.value)}
-                        style={styles.select}
-                      >
-                        {allowedVisuals(widget).map((option) => (
-                          <option key={option} value={option}>
-                            {option.toUpperCase()}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        style={styles.smallBtn}
-                        onClick={() => setDrillWidgetId(widgetId)}
-                      >
-                        <FiTarget size={13} /> Drill
-                      </button>
-                      {editMode && (
-                        <>
-                          <button style={styles.smallBtn}>
-                            <FiMove size={13} />
-                          </button>
-                          <button
-                            style={styles.smallBtn}
-                            onClick={() => toggleHidden(widgetId)}
-                          >
-                            <FiX size={13} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {renderWidgetContent(widget, visualType, filteredData)}
-                </article>
-              );
-            })}
-          </div>
-
-          {layout.hidden_widgets.length > 0 && (
-            <div style={styles.infoCard}>
-              Hidden widgets: {layout.hidden_widgets.join(", ")}
-            </div>
-          )}
-
-          {drillWidgetId && (
-            <div style={styles.drillPanel}>
-              <div style={styles.drillHeader}>
-                <h3 style={styles.widgetTitle}>
-                  Drill-Down: {widgetsById[drillWidgetId]?.title || drillWidgetId}
-                </h3>
-                <button style={styles.smallBtn} onClick={() => setDrillWidgetId(null)}>
-                  Close
-                </button>
-              </div>
-              <pre style={styles.pre}>
-                {JSON.stringify(widgetsById[drillWidgetId], null, 2)}
-              </pre>
-            </div>
-          )}
-        </>
+      {/* ── Drill-down panel ── */}
+      {drillWidgetId && (
+        <DrillPanel
+          widget={widgetsById[drillWidgetId]}
+          onClose={() => setDrillWidgetId(null)}
+        />
       )}
     </section>
   );
 };
 
-function extractWidgets(state: DashboardState | null): DashboardWidget[] {
-  if (!state?.sections || !Array.isArray(state.sections)) {
-    return [];
+// ─── Widget Content ───────────────────────────────────────────────────────────
+
+interface WidgetContentProps {
+  widget: DashboardWidget;
+  visualType: VisualType;
+  filteredData: any;
+}
+
+const WidgetContent = ({ widget, visualType, filteredData }: WidgetContentProps) => {
+  if (visualType === "metric") {
+    return <MetricCard widget={widget} />;
   }
 
+  if (visualType === "table") {
+    const rows = Array.isArray(filteredData) ? filteredData : [];
+    if (!rows.length) return <EmptyViz />;
+    const cols = Object.keys(rows[0]).slice(0, 7);
+    return (
+      <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
+        <table style={s.table}>
+          <thead>
+            <tr>
+              {cols.map((c) => <th key={c} style={s.th}>{c.replace(/_/g, " ")}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 50).map((row: any, i: number) => (
+              <tr key={i} style={i % 2 === 1 ? { background: "#f9fafb" } : {}}>
+                {cols.map((c) => (
+                  <td key={c} style={s.td}>{formatCell(row[c])}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length > 50 && (
+          <p style={{ textAlign: "center", color: "#9ca3af", fontSize: 11, margin: "8px 0 0" }}>
+            Showing 50 of {rows.length} rows
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // Chart types
+  const series = buildSeries(widget, filteredData);
+  if (!series.length) return <EmptyViz />;
+
+  return (
+    <div style={{ width: "100%", height: 260 }}>
+      <ResponsiveContainer>
+        {renderChart(visualType, series)}
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+function renderChart(type: VisualType, data: Array<{ x: string; y: number }>) {
+  switch (type) {
+    case "area":
+      return (
+        <AreaChart data={data}>
+          <defs>
+            <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={CHART_COLORS[0]} stopOpacity={0.25} />
+              <stop offset="100%" stopColor={CHART_COLORS[0]} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+          <XAxis dataKey="x" tick={AXIS_STYLE} axisLine={{ stroke: "#e5e7eb" }} tickLine={false} />
+          <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={TOOLTIP_STYLE} />
+          <Area type="monotone" dataKey="y" stroke={CHART_COLORS[0]} strokeWidth={2} fill="url(#ag)" />
+        </AreaChart>
+      );
+    case "bar":
+      return (
+        <BarChart data={data} barCategoryGap="20%">
+          <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+          <XAxis dataKey="x" tick={AXIS_STYLE} axisLine={{ stroke: "#e5e7eb" }} tickLine={false} />
+          <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "rgba(99,102,241,0.06)" }} />
+          <Bar dataKey="y" radius={[5, 5, 0, 0]}>
+            {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+          </Bar>
+        </BarChart>
+      );
+    case "pie":
+      return (
+        <PieChart>
+          <Pie data={data} dataKey="y" nameKey="x" cx="50%" cy="50%" outerRadius="80%" strokeWidth={2} stroke="#fff">
+            {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+          </Pie>
+          <Tooltip contentStyle={TOOLTIP_STYLE} />
+          <Legend wrapperStyle={{ fontSize: 11, color: "#6b7280" }} iconType="circle" iconSize={8} />
+        </PieChart>
+      );
+    default: // line
+      return (
+        <LineChart data={data}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+          <XAxis dataKey="x" tick={AXIS_STYLE} axisLine={{ stroke: "#e5e7eb" }} tickLine={false} />
+          <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={TOOLTIP_STYLE} />
+          <Line
+            type="monotone" dataKey="y" stroke={CHART_COLORS[0]} strokeWidth={2.5}
+            dot={{ r: 3, fill: CHART_COLORS[0], strokeWidth: 0 }}
+            activeDot={{ r: 6, fill: CHART_COLORS[0], stroke: "#fff", strokeWidth: 2 }}
+          />
+        </LineChart>
+      );
+  }
+}
+
+// ─── Metric Card ──────────────────────────────────────────────────────────────
+
+const MetricCard = ({ widget }: { widget: DashboardWidget }) => {
+  const TrendIcon =
+    widget.trend === "up" ? FiTrendingUp :
+      widget.trend === "down" ? FiTrendingDown :
+        FiMinus;
+
+  const trendColor =
+    widget.trend === "up" ? "#10b981" :
+      widget.trend === "down" ? "#ef4444" :
+        "#9ca3af";
+
+  return (
+    <div style={s.metricInner}>
+      <div style={s.metricValue}>
+        {widget.value !== undefined ? String(widget.value) : "—"}
+        {widget.unit && <span style={s.metricUnit}>{widget.unit}</span>}
+      </div>
+      {widget.trendValue && (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, color: trendColor, fontSize: 13 }}>
+          <TrendIcon size={14} /> {widget.trendValue}
+        </div>
+      )}
+      {widget.description && <p style={s.metricDesc}>{widget.description}</p>}
+      {widget.metrics && (
+        <div style={s.metricGrid}>
+          {Object.entries(widget.metrics).map(([k, v]) => (
+            <div key={k} style={s.metricChip}>
+              <span style={{ color: "#9ca3af", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>{k}</span>
+              <strong style={{ fontSize: 14, color: "#111827" }}>{String(v)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Drill Panel ─────────────────────────────────────────────────────────────
+
+const DrillPanel = ({
+  widget,
+  onClose,
+}: {
+  widget: DashboardWidget | undefined;
+  onClose: () => void;
+}) => {
+  if (!widget) return null;
+  const rows = Array.isArray(widget.data) ? widget.data : null;
+  const cols = rows?.length ? Object.keys(rows[0]) : [];
+
+  return (
+    <div style={s.drillOverlay}>
+      <div style={s.drillPanel}>
+        <div style={s.drillHeader}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#111827" }}>
+              {widget.title || widget.id}
+            </h2>
+            {widget.subtitle && <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>{widget.subtitle}</p>}
+          </div>
+          <button style={s.closeBtn} onClick={onClose}><FiX size={18} /></button>
+        </div>
+
+        {/* KPI row */}
+        {widget.value !== undefined && (
+          <div style={s.drillKpi}>
+            <div style={s.drillKpiValue}>{String(widget.value)}{widget.unit ? ` ${widget.unit}` : ""}</div>
+            {widget.description && <p style={{ color: "#6b7280", fontSize: 13, margin: 0 }}>{widget.description}</p>}
+          </div>
+        )}
+
+        {/* Metrics grid */}
+        {widget.metrics && (
+          <div style={s.drillMetricGrid}>
+            {Object.entries(widget.metrics).map(([k, v]) => (
+              <div key={k} style={s.drillMetricCard}>
+                <span style={{ color: "#9ca3af", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px" }}>{k}</span>
+                <strong style={{ fontSize: 20, color: "#111827", fontWeight: 700 }}>{String(v)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Data table */}
+        {rows && rows.length > 0 && (
+          <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 380 }}>
+            <table style={s.table}>
+              <thead>
+                <tr>{cols.map((c) => <th key={c} style={s.th}>{c.replace(/_/g, " ")}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.map((row: any, i: number) => (
+                  <tr key={i} style={i % 2 === 1 ? { background: "#f9fafb" } : {}}>
+                    {cols.map((c) => <td key={c} style={s.td}>{formatCell(row[c])}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {!rows && !widget.value && !widget.metrics && (
+          <p style={{ color: "#9ca3af", fontSize: 13 }}>No detailed data available for this widget.</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Skeleton Loader ──────────────────────────────────────────────────────────
+
+const SkeletonGrid = () => (
+  <div style={s.widgetGrid}>
+    {Array.from({ length: 6 }).map((_, i) => (
+      <div key={i} style={{ ...s.card, gridColumn: `span ${i < 3 ? 4 : 6}`, padding: 20 }}>
+        <div style={sk.title} />
+        <div style={{ ...sk.bar, width: "60%", marginTop: 12 }} />
+        <div style={{ ...sk.bar, width: "80%", marginTop: 8 }} />
+        <div style={{ ...sk.bar, width: "50%", marginTop: 8 }} />
+      </div>
+    ))}
+  </div>
+);
+
+const sk: Record<string, React.CSSProperties> = {
+  title: {
+    height: 14, borderRadius: 6, background: "linear-gradient(90deg,#f3f4f6 25%,#e5e7eb 50%,#f3f4f6 75%)",
+    backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite", width: "45%",
+  },
+  bar: {
+    height: 10, borderRadius: 4, background: "linear-gradient(90deg,#f3f4f6 25%,#e5e7eb 50%,#f3f4f6 75%)",
+    backgroundSize: "200% 100%", animation: "shimmer 1.4s infinite",
+  },
+};
+
+const EmptyViz = () => (
+  <div style={s.emptyViz}>No data available</div>
+);
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function extractWidgets(state: DashboardState | null): DashboardWidget[] {
+  if (!state?.sections || !Array.isArray(state.sections)) return [];
   const widgets: DashboardWidget[] = [];
   for (const section of state.sections) {
-    const items = Array.isArray(section.widgets) ? section.widgets : [];
-    for (const widget of items) {
-      widgets.push({
-        ...widget,
-        id: String(widget.id || `widget_${widgets.length + 1}`),
-      });
+    for (const w of (section.widgets || [])) {
+      widgets.push({ ...w, id: String((w as any).id || `widget_${widgets.length + 1}`) });
     }
   }
   return widgets;
 }
 
 function normalizeLayout(rawLayout: any, widgetIds: string[]): UserLayout {
-  const base = { ...DEFAULT_LAYOUT };
   if (!rawLayout || typeof rawLayout !== "object") {
-    return {
-      ...base,
-      widget_order: [...widgetIds],
-    };
+    return { ...DEFAULT_LAYOUT, widget_order: [...widgetIds] };
   }
-
   const order = Array.isArray(rawLayout.widget_order)
     ? rawLayout.widget_order.map(String).filter((id: string) => widgetIds.includes(id))
     : [];
-
   const hidden = Array.isArray(rawLayout.hidden_widgets)
     ? rawLayout.hidden_widgets.map(String).filter((id: string) => widgetIds.includes(id))
     : [];
-
   return {
     layout_version: Number(rawLayout.layout_version || 1),
     widget_order: [...order, ...widgetIds.filter((id) => !order.includes(id))],
-    widget_visuals: typeof rawLayout.widget_visuals === "object" && rawLayout.widget_visuals
-      ? rawLayout.widget_visuals
-      : {},
+    widget_visuals: typeof rawLayout.widget_visuals === "object" ? rawLayout.widget_visuals : {},
     hidden_widgets: hidden,
     slicers: {
       machine: String(rawLayout.slicers?.machine || "all"),
@@ -509,10 +822,11 @@ function uniqueValues(rows: Record<string, any>[], keys: string[]): string[] {
   const values = new Set<string>();
   for (const row of rows) {
     for (const key of keys) {
-      const value = row[key];
-      if (value === undefined || value === null) continue;
-      const normalized = String(value).trim();
-      if (normalized) values.add(normalized);
+      const v = row[key];
+      if (v !== undefined && v !== null) {
+        const n = String(v).trim();
+        if (n) values.add(n);
+      }
     }
   }
   return Array.from(values).sort((a, b) => a.localeCompare(b));
@@ -520,404 +834,298 @@ function uniqueValues(rows: Record<string, any>[], keys: string[]): string[] {
 
 function applySlicers(data: any, slicers: UserLayout["slicers"]): any {
   if (!Array.isArray(data)) return data;
-
   return data.filter((row) => {
     if (!row || typeof row !== "object") return false;
-    const machineValue = String(row.equipment_id || row.resource || row.machine_name || "all");
-    const failureValue = String(row.failure_type || row.event_type || row.title || "all");
-
-    if (slicers.machine !== "all" && machineValue !== slicers.machine) {
-      return false;
-    }
-    if (slicers.failureType !== "all" && failureValue !== slicers.failureType) {
-      return false;
-    }
-
-    if (slicers.timeRange === "all") {
-      return true;
-    }
-
-    const timestampCandidate = row.event_time || row.created_at || row.timestamp || row.date;
-    if (!timestampCandidate) {
-      return true;
-    }
-    const timestamp = new Date(timestampCandidate).getTime();
-    if (Number.isNaN(timestamp)) {
-      return true;
-    }
-
-    const now = Date.now();
-    const lookbackDays = slicers.timeRange === "7d" ? 7 : slicers.timeRange === "30d" ? 30 : 90;
-    return timestamp >= now - lookbackDays * 24 * 60 * 60 * 1000;
+    const machineVal = String(row.equipment_id || row.resource || row.machine_name || "all");
+    const failureVal = String(row.failure_type || row.event_type || row.title || "all");
+    if (slicers.machine !== "all" && machineVal !== slicers.machine) return false;
+    if (slicers.failureType !== "all" && failureVal !== slicers.failureType) return false;
+    if (slicers.timeRange === "all") return true;
+    const ts = row.event_time || row.created_at || row.timestamp || row.date;
+    if (!ts) return true;
+    const t = new Date(ts).getTime();
+    if (isNaN(t)) return true;
+    const days = slicers.timeRange === "7d" ? 7 : slicers.timeRange === "30d" ? 30 : 90;
+    return t >= Date.now() - days * 86400000;
   });
 }
 
-function defaultVisual(widget: DashboardWidget): string {
+function autoVisualType(widget: DashboardWidget): VisualType {
   if (widget.type === "table") return "table";
   if (widget.type === "metric" || widget.type === "card") return "metric";
-  if (Array.isArray(widget.data)) return "table";
+  if (Array.isArray(widget.data) && widget.data.length > 0) return "line";
   return "metric";
 }
 
-function allowedVisuals(widget: DashboardWidget): string[] {
-  if (Array.isArray(widget.data)) {
-    return ["table", "line", "bar", "metric"];
+function allowedVisuals(widget: DashboardWidget): VisualType[] {
+  if (Array.isArray(widget.data) && widget.data.length > 0) {
+    return ["line", "area", "bar", "pie", "table", "metric"];
   }
-  return ["metric", "table"];
+  return ["metric"];
 }
 
-function renderWidgetContent(
-  widget: DashboardWidget,
-  visualType: string,
-  filteredData: any
-) {
-  if (visualType === "table") {
-    if (!Array.isArray(filteredData) || filteredData.length === 0) {
-      return <p style={styles.mutedText}>No tabular data available for this widget.</p>;
-    }
-    const columns = Object.keys(filteredData[0]).slice(0, 6);
-    return (
-      <div style={styles.tableWrap}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column} style={styles.th}>{column}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredData.slice(0, 8).map((row, idx) => (
-              <tr key={idx}>
-                {columns.map((column) => (
-                  <td key={column} style={styles.td}>{String(row[column] ?? "")}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  if (visualType === "line" || visualType === "bar") {
-    const series = buildChartSeries(widget, filteredData);
-    if (!series.length) {
-      return <p style={styles.mutedText}>No numeric series available for charting.</p>;
-    }
-    return (
-      <div style={{ width: "100%", height: 220 }}>
-        <ResponsiveContainer>
-          {visualType === "line" ? (
-            <LineChart data={series}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="x" tick={{ fontSize: 12, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 12, fill: "#64748b" }} />
-              <Tooltip />
-              <Line type="monotone" dataKey="y" stroke="#6366f1" strokeWidth={2} dot={false} />
-            </LineChart>
-          ) : (
-            <BarChart data={series}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="x" tick={{ fontSize: 12, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 12, fill: "#64748b" }} />
-              <Tooltip />
-              <Bar dataKey="y" fill="#6366f1" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          )}
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      {widget.value !== undefined && (
-        <div style={styles.metricValue}>{String(widget.value)}</div>
-      )}
-      {widget.description && <p style={styles.mutedText}>{widget.description}</p>}
-      {widget.metrics && (
-        <div style={styles.metricGrid}>
-          {Object.entries(widget.metrics).map(([key, value]) => (
-            <div key={key} style={styles.metricChip}>
-              <span>{key}</span>
-              <strong>{String(value)}</strong>
-            </div>
-          ))}
-        </div>
-      )}
-      {!widget.metrics && widget.value === undefined && (
-        <pre style={styles.pre}>{JSON.stringify(filteredData ?? widget.data ?? {}, null, 2)}</pre>
-      )}
-    </div>
-  );
+function canSwitchVisual(widget: DashboardWidget): boolean {
+  return Array.isArray(widget.data) && widget.data.length > 0;
 }
 
-function buildChartSeries(widget: DashboardWidget, filteredData: any): Array<{ x: string; y: number }> {
+function widgetGridSpan(widget: DashboardWidget): number {
+  if (widget.type === "table") return 12;
+  if (widget.type === "metric" || widget.type === "card") return 3;
+  if (Array.isArray(widget.data)) return 6;
+  return 3;
+}
+
+function buildSeries(widget: DashboardWidget, filteredData: any): Array<{ x: string; y: number }> {
   if (Array.isArray(filteredData) && filteredData.length > 0) {
-    if (
-      filteredData[0] &&
-      Object.prototype.hasOwnProperty.call(filteredData[0], "x") &&
-      Object.prototype.hasOwnProperty.call(filteredData[0], "y")
-    ) {
-      return filteredData
-        .map((row) => ({
-          x: String(row.x),
-          y: Number(row.y),
-        }))
-        .filter((row) => Number.isFinite(row.y));
+    const first = filteredData[0];
+    if (Object.prototype.hasOwnProperty.call(first, "x") && Object.prototype.hasOwnProperty.call(first, "y")) {
+      return filteredData.map((r: any) => ({ x: String(r.x), y: Number(r.y) })).filter((r: any) => isFinite(r.y));
     }
-
-    const keys = Object.keys(filteredData[0]);
-    const numericKey = keys.find((key) => Number.isFinite(Number(filteredData[0][key])));
-    const categoryKey = keys.find((key) => key !== numericKey) || keys[0];
-    if (numericKey) {
-      return filteredData
-        .slice(0, 50)
-        .map((row, idx) => ({
-          x: String(row[categoryKey] ?? `row_${idx + 1}`),
-          y: Number(row[numericKey]),
-        }))
-        .filter((row) => Number.isFinite(row.y));
+    const keys = Object.keys(first);
+    const numKey = keys.find((k) => isFinite(Number(first[k])));
+    const catKey = keys.find((k) => k !== numKey) || keys[0];
+    if (numKey) {
+      return filteredData.slice(0, 60).map((r: any, i: number) => ({
+        x: String(r[catKey] ?? `row_${i + 1}`),
+        y: Number(r[numKey]),
+      })).filter((r: any) => isFinite(r.y));
     }
   }
-
-  if (Number.isFinite(Number(widget.value))) {
+  if (isFinite(Number(widget.value))) {
     return [{ x: widget.title || widget.id, y: Number(widget.value) }];
   }
-
   return [];
 }
 
-function severityBadge(severity: string): React.CSSProperties {
-  const normalized = String(severity).toUpperCase();
-  if (normalized === "CRITICAL") {
-    return styles.criticalBadge;
-  }
-  if (normalized === "WARNING") {
-    return styles.warningBadge;
-  }
-  return styles.infoBadge;
+function formatCell(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "number") return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return String(value);
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {},
-  headerRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "20px",
-    gap: "12px",
-    flexWrap: "wrap",
+// Formats an ISO timestamp as a relative label: "just now", "3m ago", "2h ago", "Jan 5"
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const diffMs = Date.now() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60_000);
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHrs = Math.floor(diffMins / 60);
+    if (diffHrs < 24) return `${diffHrs}h ago`;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function widgetCardStyle(widget: DashboardWidget): React.CSSProperties {
+  const base = { ...s.card };
+  if (widget.type === "metric" || widget.type === "card") {
+    return { ...base, ...s.cardMetric };
+  }
+  return base;
+}
+
+function severityBadge(severity: string): React.CSSProperties {
+  const n = String(severity).toUpperCase();
+  if (n === "CRITICAL") return s.badgeCritical;
+  if (n === "WARNING") return s.badgeWarning;
+  return s.badgeInfo;
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const s: Record<string, React.CSSProperties> = {
+  page: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 },
+  topBar: {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    padding: "14px 20px", borderBottom: "1px solid #e5e7eb", background: "#fff",
+    flexShrink: 0, gap: 12, flexWrap: "wrap",
   },
-  title: {
-    fontSize: "22px",
-    fontWeight: 700,
-    color: "#111827",
-    margin: 0,
-    marginBottom: 4,
-  },
-  subtitle: { color: "#6b7280", fontSize: 13 },
-  actionsRow: { display: "flex", gap: 8, flexWrap: "wrap" },
-  btn: {
-    background: "#f3f4f6",
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    padding: "8px 14px",
-    fontSize: 13,
-    fontWeight: 500,
-    color: "#111827",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-  },
-  smallBtn: {
-    background: "#ffffff",
-    border: "1px solid #d1d5db",
-    borderRadius: "8px",
-    padding: "6px 10px",
-    fontSize: "12px",
-    color: "#374151",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-  },
-  infoCard: {
-    background: "#ffffff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "16px",
-    color: "#374151",
-    marginBottom: "14px",
-  },
-  errorCard: {
-    borderLeft: "4px solid #ef4444",
-    color: "#991b1b",
-  },
-  filterPanel: {
-    background: "#ffffff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "14px",
-    marginBottom: "14px",
-  },
-  filterTitle: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    color: "#111827",
+  pageTitle: { margin: 0, fontSize: 18, fontWeight: 700, color: "#111827", lineHeight: 1.2 },
+  pageSubtitle: { fontSize: 12, color: "#9ca3af" },
+  // "Saved 3m ago" green pill — only shown after first successful save
+  savedTimestamp: {
+    fontSize: 11,
     fontWeight: 600,
-    marginBottom: "10px",
+    color: "#065f46",
+    background: "#d1fae5",
+    border: "1px solid #6ee7b7",
+    borderRadius: 6,
+    padding: "2px 7px",
+    display: "inline-block",
   },
-  filterGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-    gap: "10px",
-    marginBottom: "8px",
+  actionsRow: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" },
+  btn: {
+    display: "inline-flex", alignItems: "center", gap: 5,
+    background: "#f9fafb", border: "1px solid #e5e7eb",
+    borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 500,
+    color: "#374151", cursor: "pointer",
+  },
+  btnActive: { background: "#eef2ff", borderColor: "#a5b4fc", color: "#4f46e5" },
+  btnSuccess: { background: "#d1fae5", borderColor: "#6ee7b7", color: "#065f46" },
+  iconBtn: {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: "transparent", border: "1px solid #e5e7eb",
+    borderRadius: 6, padding: "5px 7px", cursor: "pointer", color: "#6b7280",
+  },
+  banner: {
+    margin: "12px 20px 0", padding: "10px 14px", borderRadius: 8,
+    background: "#fff", border: "1px solid #e5e7eb", fontSize: 13, color: "#374151",
+    flexShrink: 0,
+  },
+  bannerError: { borderLeft: "4px solid #ef4444", color: "#991b1b", background: "#fef2f2" },
+  body: { display: "flex", flex: 1, minHeight: 0, overflow: "hidden" },
+
+  // Sidebar
+  sidebar: {
+    width: 220, flexShrink: 0, borderRight: "1px solid #e5e7eb",
+    background: "#fafafa", padding: "16px 14px",
+    overflowY: "auto", display: "flex", flexDirection: "column", gap: 14,
+  },
+  sidebarTitle: {
+    display: "flex", alignItems: "center", gap: 6,
+    fontSize: 12, fontWeight: 700, color: "#374151",
+    textTransform: "uppercase", letterSpacing: "0.5px",
   },
   filterLabel: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-    fontSize: "12px",
-    color: "#4b5563",
-    fontWeight: 600,
+    display: "flex", flexDirection: "column", gap: 5,
+    fontSize: 11, fontWeight: 600, color: "#4b5563",
   },
   select: {
-    border: "1px solid #d1d5db",
-    borderRadius: "8px",
-    padding: "6px 8px",
-    fontSize: "12px",
-    color: "#111827",
-    background: "#fff",
+    border: "1px solid #d1d5db", borderRadius: 7,
+    padding: "6px 8px", fontSize: 12, color: "#111827", background: "#fff",
   },
+  resetBtn: {
+    background: "#fff", border: "1px solid #d1d5db", borderRadius: 7,
+    padding: "7px 10px", fontSize: 11, color: "#6b7280", cursor: "pointer",
+  },
+  hiddenList: { borderTop: "1px solid #e5e7eb", paddingTop: 12 },
+  hiddenListTitle: { fontSize: 11, fontWeight: 700, color: "#9ca3af", marginBottom: 6, textTransform: "uppercase" },
+  hiddenChip: {
+    display: "flex", alignItems: "center", gap: 6,
+    background: "#fff", border: "1px solid #e5e7eb",
+    borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#374151", marginBottom: 4,
+  },
+  chipBtn: {
+    background: "none", border: "none", cursor: "pointer",
+    color: "#9ca3af", display: "flex", padding: 2,
+  },
+
+  // Canvas
+  canvas: { flex: 1, overflowY: "auto", padding: "20px 24px" },
+  sectionHeader: {
+    display: "flex", alignItems: "center", gap: 12, marginBottom: 14,
+  },
+  sectionDivider: { flex: 1, height: 1, background: "#e5e7eb" },
   widgetGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-    gap: "12px",
+    gridTemplateColumns: "repeat(12, 1fr)",
+    gap: 14,
+    alignItems: "start",
   },
-  widgetCard: {
+
+  // Card
+  card: {
+    background: "#fff", borderRadius: 12,
     border: "1px solid #e5e7eb",
-    borderRadius: "10px",
-    padding: "12px",
-    background: "#ffffff",
     boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+    overflow: "hidden", transition: "box-shadow 0.15s ease",
   },
-  widgetHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "8px",
-    marginBottom: "10px",
-    alignItems: "flex-start",
+  cardMetric: {
+    background: "linear-gradient(135deg,#ffffff 60%,#f5f3ff)",
+    borderColor: "#ede9fe",
   },
-  widgetTitle: {
-    margin: 0,
-    fontSize: "14px",
-    color: "#111827",
+  cardDragOver: {
+    boxShadow: "0 0 0 2px #6366f1",
+    borderColor: "#6366f1",
   },
-  widgetActions: {
-    display: "flex",
-    gap: "6px",
-    alignItems: "center",
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
+  cardDragging: { opacity: 0.5 },
+  cardHeader: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "12px 16px 0", gap: 8,
   },
-  metricValue: {
-    fontSize: "26px",
-    fontWeight: 700,
-    color: "#111827",
-    marginBottom: "8px",
+  cardTitle: { fontSize: 13, fontWeight: 700, color: "#374151", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  cardActions: { display: "flex", gap: 6, alignItems: "center", flexShrink: 0 },
+  cardBody: { padding: "12px 16px 16px" },
+  vizSelect: {
+    border: "1px solid #e5e7eb", borderRadius: 6,
+    padding: "4px 6px", fontSize: 11, color: "#374151",
+    background: "#f9fafb", cursor: "pointer",
   },
-  mutedText: {
-    margin: 0,
-    color: "#6b7280",
-    fontSize: "13px",
-    lineHeight: 1.5,
-  },
-  metricGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-    gap: "8px",
-  },
+
+  // Metric
+  metricInner: { display: "flex", flexDirection: "column", gap: 6 },
+  metricValue: { fontSize: 32, fontWeight: 800, color: "#111827", lineHeight: 1, letterSpacing: "-0.03em" },
+  metricUnit: { fontSize: 16, fontWeight: 500, color: "#6b7280", marginLeft: 4 },
+  metricDesc: { margin: 0, fontSize: 12, color: "#9ca3af", lineHeight: 1.5 },
+  metricGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px,1fr))", gap: 8, marginTop: 4 },
   metricChip: {
-    border: "1px solid #e5e7eb",
-    borderRadius: "8px",
-    padding: "8px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-    fontSize: "12px",
-    color: "#4b5563",
-    background: "#fafafa",
+    border: "1px solid #f3f4f6", borderRadius: 8, padding: "8px 10px",
+    display: "flex", flexDirection: "column", gap: 2, background: "#fafafa",
   },
-  tableWrap: { overflowX: "auto" },
-  table: { width: "100%", borderCollapse: "collapse" },
+
+  // Table
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
   th: {
-    textAlign: "left",
-    fontSize: "11px",
-    color: "#6b7280",
-    borderBottom: "1px solid #e5e7eb",
-    padding: "8px",
-    textTransform: "uppercase",
-    letterSpacing: "0.4px",
+    textAlign: "left", padding: "9px 10px", fontSize: 10, fontWeight: 700,
+    color: "#6b7280", borderBottom: "2px solid #e5e7eb", background: "#f9fafb",
+    position: "sticky", top: 0, textTransform: "uppercase", letterSpacing: "0.4px",
   },
-  td: { fontSize: "12px", color: "#111827", borderBottom: "1px solid #f3f4f6", padding: "8px" },
-  pre: {
-    margin: 0,
-    fontSize: "11px",
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    background: "#f8fafc",
-    borderRadius: "8px",
-    border: "1px solid #e5e7eb",
-    padding: "8px",
-    maxHeight: "220px",
-    overflow: "auto",
+  td: { padding: "8px 10px", borderBottom: "1px solid #f3f4f6", color: "#374151" },
+
+  // Empty state
+  emptyState: {
+    display: "flex", flexDirection: "column", alignItems: "center",
+    justifyContent: "center", padding: "80px 20px", textAlign: "center",
+  },
+  emptyViz: {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    height: 180, color: "#d1d5db", fontSize: 13,
+  },
+
+  // Drill panel
+  drillOverlay: {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+    zIndex: 1000, display: "flex", alignItems: "flex-end", justifyContent: "flex-end",
   },
   drillPanel: {
-    marginTop: "14px",
-    background: "#ffffff",
-    borderRadius: "12px",
-    border: "1px solid #dbeafe",
-    padding: "14px",
+    width: 520, height: "100vh", background: "#fff", overflowY: "auto",
+    padding: 28, display: "flex", flexDirection: "column", gap: 20,
+    boxShadow: "-8px 0 32px rgba(0,0,0,0.12)",
   },
   drillHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "8px",
+    display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12,
   },
-  criticalBadge: {
-    display: "inline-block",
-    padding: "2px 8px",
-    borderRadius: "999px",
-    fontSize: "11px",
-    fontWeight: 700,
-    color: "#991b1b",
-    background: "#fee2e2",
-    border: "1px solid #fecaca",
+  closeBtn: {
+    background: "#f3f4f6", border: "none", borderRadius: 8,
+    padding: "6px 8px", cursor: "pointer", color: "#374151",
+    display: "flex", alignItems: "center",
   },
-  warningBadge: {
-    display: "inline-block",
-    padding: "2px 8px",
-    borderRadius: "999px",
-    fontSize: "11px",
-    fontWeight: 700,
-    color: "#92400e",
-    background: "#fef3c7",
-    border: "1px solid #fde68a",
+  drillKpi: {
+    background: "linear-gradient(135deg,#f5f3ff,#ede9fe)",
+    borderRadius: 12, padding: "18px 20px",
   },
-  infoBadge: {
-    display: "inline-block",
-    padding: "2px 8px",
-    borderRadius: "999px",
-    fontSize: "11px",
-    fontWeight: 700,
-    color: "#1d4ed8",
-    background: "#dbeafe",
-    border: "1px solid #bfdbfe",
+  drillKpiValue: { fontSize: 42, fontWeight: 800, color: "#4f46e5", lineHeight: 1, letterSpacing: "-0.03em" },
+  drillMetricGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px,1fr))", gap: 10 },
+  drillMetricCard: {
+    border: "1px solid #e5e7eb", borderRadius: 10, padding: "12px 14px",
+    display: "flex", flexDirection: "column", gap: 4, background: "#fafafa",
+  },
+
+  // Severity badges
+  badgeCritical: {
+    display: "inline-block", padding: "2px 8px", borderRadius: 999,
+    fontSize: 10, fontWeight: 700, color: "#991b1b", background: "#fee2e2", border: "1px solid #fecaca",
+  },
+  badgeWarning: {
+    display: "inline-block", padding: "2px 8px", borderRadius: 999,
+    fontSize: 10, fontWeight: 700, color: "#92400e", background: "#fef3c7", border: "1px solid #fde68a",
+  },
+  badgeInfo: {
+    display: "inline-block", padding: "2px 8px", borderRadius: 999,
+    fontSize: 10, fontWeight: 700, color: "#1d4ed8", background: "#dbeafe", border: "1px solid #bfdbfe",
   },
 };
 

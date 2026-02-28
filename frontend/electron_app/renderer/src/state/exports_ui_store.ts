@@ -16,7 +16,7 @@ export type ExportScope =
 export type ExportFormat =
   | "pdf"
   | "excel"
-  | "csv";
+  | "docx";
 
 export interface ExportRequest {
   runId: string;
