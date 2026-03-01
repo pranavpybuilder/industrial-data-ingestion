@@ -47,7 +47,8 @@ echo.
 python -m PyInstaller ^
   OfflineIndustrialIntelligence.spec ^
   --noconfirm ^
-  --clean
+  --clean ^
+  --log-level WARN
 
 echo.
 echo ============================================================

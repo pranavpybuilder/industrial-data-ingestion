@@ -268,6 +268,20 @@ class InsightOrchestrator:
                 ml_conf = sum([m.get("confidence", 0.5) for m in ml_set]) / len(ml_set)
                 blended_conf = 0.5 * rule_conf + 0.5 * ml_conf
                 
+                # Build a plain English merged description
+                human_resource = self._humanize_resource(resource)
+                merged_desc = (
+                    f"Both rule-based checks and data analysis have independently flagged "
+                    f"concerns with {human_resource}. When multiple methods agree, it "
+                    f"increases our confidence that this issue is real and needs attention."
+                )
+                merged_remed = self._combine_remediations(rule_set)
+                if not merged_remed or merged_remed == "See dashboard for details":
+                    merged_remed = (
+                        f"Investigate {human_resource} as a priority. Multiple signals "
+                        f"confirm this issue. Check recent maintenance records and "
+                        f"schedule an inspection."
+                    )
                 merged.append({
                     "resource": resource,
                     "source": "MERGED",
@@ -277,8 +291,9 @@ class InsightOrchestrator:
                     "merged_confidence": blended_conf,
                     "rule_names": [r.get("rule_name") for r in rule_set],
                     "ml_types": [m.get("finding_type") for m in ml_set],
-                    "message": f"Rule + ML agreement on {resource}",
-                    "remediation": self._combine_remediations(rule_set),
+                    "message": merged_desc,
+                    "description": merged_desc,
+                    "remediation": merged_remed,
                     "details": {"rules": rule_set, "ml": ml_set},
                 })
         
@@ -376,18 +391,87 @@ class InsightOrchestrator:
     
     
     def _generate_title(self, finding: Dict) -> str:
-        """Generate human-readable title for insight"""
+        """Generate human-readable title for insight — plain English, NO severity prefix,
+        NO algorithm names, NO variable names."""
         source = finding.get("source")
         resource = finding.get("resource", "System")
-        severity = finding.get("severity", "INFO")
-        
+        severity = finding.get("severity", "INFO").upper()
+        finding_type = finding.get("finding_type", "")
+
+        # Humanize the resource name
+        human_resource = self._humanize_resource(resource)
+
         if source == "RULE":
-            return f"{severity}: Rule Alert on {resource}"
+            rule_name = finding.get("rule_name", "")
+            return self._title_from_rule(rule_name, human_resource, severity)
         elif source == "ML":
-            finding_type = finding.get("finding_type", "Anomaly")
-            return f"{severity}: ML {finding_type} on {resource}"
+            return self._title_from_ml(finding_type, human_resource, severity)
+        elif source == "EQUIPMENT_ANALYSIS":
+            return self._title_from_equipment(finding_type, human_resource, severity)
         else:  # MERGED
-            return f"{severity}: Rule + ML Agreement on {resource}"
+            return self._title_from_merged(human_resource, severity)
+
+    @staticmethod
+    def _humanize_resource(resource: str) -> str:
+        """Convert resource like 'maint__notification' to 'Maintenance Notification'."""
+        if not resource or resource == "SYSTEM":
+            return "Overall System"
+        name = str(resource).replace("__", " ").replace("_", " ")
+        abbreviations = {
+            "dur": "Duration", "hrs": "Hours", "cnt": "Count",
+            "maint": "Maintenance", "equip": "Equipment",
+            "freq": "Frequency", "avg": "Average", "temp": "Temperature",
+        }
+        words = name.split()
+        expanded = [abbreviations.get(w.lower(), w.capitalize()) for w in words if w]
+        return " ".join(expanded) if expanded else resource
+
+    @staticmethod
+    def _title_from_rule(rule_name: str, resource: str, severity: str) -> str:
+        title_map = {
+            "PMOrderOverdue": "Preventive Maintenance Overdue",
+            "RepeatedFailurePattern": "Repeated Equipment Failures Detected",
+            "TemperatureUptrend": "Equipment Temperature Rising",
+            "VibrationSpike": "High Vibration Detected",
+            "EnergyAnomaly": "Energy Consumption Above Normal",
+            "RFIDDataGap": "Equipment Scanner Data Gap",
+            "RepeatEquipmentFailure": "Same Equipment Breaking Down Repeatedly",
+            "HighMTTR": "Unusually Long Repair Times",
+            "FailureEscalation": "Breakdown Frequency Increasing",
+            "HighConsumptionDay": "Unusually High Energy Usage Day",
+            "ConsumptionTrend": "Energy Usage Trending Upward",
+        }
+        if rule_name in title_map:
+            return title_map[rule_name]
+        # Fallback: humanize the rule name
+        return rule_name.replace("_", " ").replace("Rule", "").strip() or f"Alert for {resource}"
+
+    @staticmethod
+    def _title_from_ml(finding_type: str, resource: str, severity: str) -> str:
+        type_titles = {
+            "ANOMALY": "Unusual Reading Detected",
+            "PATTERN": "Concerning Pattern Identified",
+            "FORECAST": "Downtime Forecast Update",
+            "PREDICTION": "Failure Recurrence Risk",
+            "RISK": "Overall Equipment Health Assessment",
+        }
+        return type_titles.get(str(finding_type).upper(), f"Analysis Finding for {resource}")
+
+    @staticmethod
+    def _title_from_equipment(finding_type: str, resource: str, severity: str) -> str:
+        type_titles = {
+            "High Risk Equipment": "Equipment at Elevated Risk",
+            "Extreme Downtime": "Extended Downtime Episodes",
+            "Repeat Failure": "Spare Part Replaced Multiple Times",
+            "Data Quality": "Data Completeness Gap Found",
+        }
+        return type_titles.get(finding_type, f"{finding_type} for {resource}")
+
+    @staticmethod
+    def _title_from_merged(resource: str, severity: str) -> str:
+        if severity == "CRITICAL":
+            return f"Multiple Signals Confirm Issue with {resource}"
+        return f"Converging Evidence for {resource}"
 
     def _normalize_severity(self, severity: Optional[str]) -> str:
         if not severity:
@@ -418,55 +502,93 @@ class InsightOrchestrator:
         # High-risk equipment alerts
         for eq_risk in equipment_intelligence.get("equipment_risk_scores", []):
             if eq_risk.get("risk_category") == "HIGH":
+                eq_id = eq_risk.get("equipment_id", "unknown")
                 insights.append({
                     "source": "EQUIPMENT_ANALYSIS",
                     "severity": "WARNING",
-                    "resource": eq_risk.get("equipment_id"),
+                    "resource": eq_id,
                     "finding_type": "High Risk Equipment",
-                    "description": f"Equipment {eq_risk.get('equipment_id')} classified as HIGH RISK. "
-                                   f"Risk score: {eq_risk.get('risk_score', 0):.2f}",
-                    "remediation": eq_risk.get("recommendation", "Implement preventive maintenance"),
+                    "description": (
+                        f"Equipment '{eq_id}' is showing a pattern of breakdowns and "
+                        f"downtime that places it in the high-risk category. This equipment "
+                        f"is more likely than others to fail again in the near term."
+                    ),
+                    "remediation": (
+                        eq_risk.get("recommendation", "") or
+                        f"Schedule a thorough inspection of equipment '{eq_id}' and "
+                        f"implement preventive maintenance before the next expected failure."
+                    ),
                     "confidence": eq_risk.get("risk_score", 0),
                 })
-        
+
         # Extreme downtime alerts
         downtime = equipment_intelligence.get("downtime_analysis", {})
-        if downtime.get("extreme_events_count", 0) > 0:
+        extreme_count = downtime.get("extreme_events_count", 0)
+        threshold_hrs = downtime.get("extreme_threshold_hours", 0)
+        if extreme_count > 0:
             insights.append({
                 "source": "EQUIPMENT_ANALYSIS",
                 "severity": "WARNING",
                 "resource": "Downtime",
                 "finding_type": "Extreme Downtime",
-                "description": f"{downtime.get('extreme_events_count')} breakdowns exceeded "
-                              f"{downtime.get('extreme_threshold_hours')} hour threshold",
-                "remediation": "Investigate root causes of extended downtime periods",
+                "description": (
+                    f"{extreme_count} breakdown(s) took an unusually long time to resolve "
+                    f"\u2014 each exceeding {threshold_hrs} hours. Extended downtime events "
+                    f"have a disproportionate impact on production and should be investigated "
+                    f"for ways to speed up the repair process."
+                ),
+                "remediation": (
+                    "Investigate why these breakdowns took so long to resolve. Consider "
+                    "pre-staging critical spare parts, improving technician response times, "
+                    "or redesigning the maintenance process for this equipment type."
+                ),
                 "confidence": 0.85,
             })
-        
+
         # Repeat spare failure alerts
         for spare_alert in equipment_intelligence.get("spare_patterns", {}).get("repeat_failure_alerts", []):
+            spare_name = spare_alert.get("spare", "unknown part")
+            replace_count = spare_alert.get("replacement_count", 0)
             insights.append({
                 "source": "EQUIPMENT_ANALYSIS",
                 "severity": "MEDIUM",
-                "resource": spare_alert.get("spare"),
+                "resource": spare_name,
                 "finding_type": "Repeat Failure",
-                "description": f"Spare part '{spare_alert.get('spare')}' replaced "
-                              f"{spare_alert.get('replacement_count')} times",
-                "remediation": "Recommend preventive maintenance for affected equipment",
+                "description": (
+                    f"The spare part '{spare_name}' has been replaced {replace_count} times. "
+                    f"Repeated replacements of the same part often indicate an underlying "
+                    f"problem that is not being addressed \u2014 such as misalignment, "
+                    f"overloading, or a defective batch of parts."
+                ),
+                "remediation": (
+                    f"Investigate why '{spare_name}' keeps failing. Check for root causes "
+                    f"like misalignment, overloading, or environmental factors. Consider "
+                    f"upgrading to a more durable alternative."
+                ),
                 "confidence": 0.75,
             })
-        
+
         # Data quality alerts
         for quality_issue in equipment_intelligence.get("data_quality", {}).get("quality_issues", []):
             if quality_issue.get("severity") == "High":
+                issue_type = quality_issue.get("issue_type", "Data gap")
+                pct = quality_issue.get("percentage", 0)
+                pct_display = round(pct)
                 insights.append({
                     "source": "EQUIPMENT_ANALYSIS",
                     "severity": "INFO",
                     "resource": "Documentation",
                     "finding_type": "Data Quality",
-                    "description": quality_issue.get("issue_type") + 
-                                  f" ({quality_issue.get('percentage', 0):.1f}% of records)",
-                    "remediation": "Improve documentation completeness and accuracy",
+                    "description": (
+                        f"{issue_type} \u2014 approximately {pct_display}% of records are affected. "
+                        f"Incomplete data makes it harder to identify root causes and predict "
+                        f"future failures. Improving data quality will directly improve the "
+                        f"accuracy of these analyses."
+                    ),
+                    "remediation": (
+                        "Require all fields to be completed when logging breakdowns. "
+                        "Review past records and fill in missing information where possible."
+                    ),
                     "confidence": 0.80,
                 })
         

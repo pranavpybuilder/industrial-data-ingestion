@@ -36,6 +36,12 @@ from rule_engine.explainability import (
     RuleExplainer,
 )
 
+from rule_engine.energy_rules import (
+    HighConsumptionDayRule,
+    ConsumptionTrendRule,
+    PeakDemandRule,
+)
+
 __all__ = [
     "RuleBase",
     "RuleResult",
@@ -55,4 +61,7 @@ __all__ = [
     "HighMTTRRule",
     "FailureEscalationRule",
     "RuleExplainer",
+    "HighConsumptionDayRule",
+    "ConsumptionTrendRule",
+    "PeakDemandRule",
 ]

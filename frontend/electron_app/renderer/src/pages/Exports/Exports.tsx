@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   FiFileText,
   FiImage,
@@ -119,7 +120,7 @@ async function captureDashboardImage(): Promise<string | null> {
     const canvas = await html2canvas(target as HTMLElement, {
       scale: 4, // 4K resolution
       useCORS: true,
-      backgroundColor: "#ffffff",
+      backgroundColor: "#f3f4f6",
       logging: false,
     });
 
@@ -134,6 +135,7 @@ async function captureDashboardImage(): Promise<string | null> {
    ───────────────────────────────────────── */
 
 const Exports = () => {
+  const navigate = useNavigate();
   const runState = useSyncExternalStore(runUI.subscribe, runUI.getSnapshot);
   const activeRun = runState.activeRunId;
 
@@ -188,10 +190,15 @@ const Exports = () => {
     if (card.needsCapture) {
       imageBase64 = await captureDashboardImage();
       if (!imageBase64) {
-        // Create a minimal fallback image (1x1 white PNG)
-        // so exports don't fail when dashboard isn't visible
-        imageBase64 =
-          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+        // Dashboard is not visible (user is on the Exports page).
+        // Guide them to use the export button on the Dashboard page instead.
+        setLoadingCard(null);
+        setErrorMsg(
+          "The dashboard is not currently visible. To capture a dashboard snapshot, " +
+          "navigate to the Dashboards page and use the \"Export Dashboard\" button in " +
+          "the toolbar. That will capture the live view at 4K resolution."
+        );
+        return;
       }
     }
 
@@ -275,12 +282,22 @@ const Exports = () => {
         {errorMsg && (
           <div style={s.errorBanner} id="export-error-banner">
             <span style={{ fontWeight: 600 }}>Export Error:</span> {errorMsg}
-            <button
-              style={{ ...s.linkBtn, marginLeft: 12 }}
-              onClick={() => setErrorMsg(null)}
-            >
-              Dismiss
-            </button>
+            <div style={{ display: "flex", gap: 8, marginLeft: 12 }}>
+              {errorMsg.includes("dashboard") && (
+                <button
+                  style={{ ...s.openBtn, color: "#6366f1", fontWeight: 600 }}
+                  onClick={() => navigate("/dashboards")}
+                >
+                  Go to Dashboard
+                </button>
+              )}
+              <button
+                style={{ ...s.linkBtn }}
+                onClick={() => setErrorMsg(null)}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 

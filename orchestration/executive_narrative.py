@@ -20,6 +20,9 @@ class ExecutiveNarrativeComposer:
     """
     Deterministic executive narrative synthesis.
     No LLM calls, no randomness, and fully offline.
+
+    All outputs are in plain English suitable for a plant manager or supervisor.
+    No variable names, no algorithm names, no raw decimal scores.
     """
 
     def compose(
@@ -42,17 +45,16 @@ class ExecutiveNarrativeComposer:
         predictive_insights = self._build_predictive_insights(ml_findings, scores)
         opportunities = self._build_optimization_opportunities(metrics, scores)
 
+        # Build a proper paragraph executive summary — NOT machine format
+        exec_summary = self._build_executive_summary(metrics, scores, verdict_label)
+
         return {
             "run_id": run_id,
             "source_type": source_type,
             "generated_at": datetime.utcnow().isoformat(),
+            "executive_summary": exec_summary,
             "sections": {
-                "Executive Summary": (
-                    f"Run {run_id} processed {metrics['row_count']} records with "
-                    f"{metrics['breakdown_frequency']} breakdowns and "
-                    f"{metrics['downtime_total_hours']:.2f} downtime hours. "
-                    f"Current risk posture is {verdict_label}."
-                ),
+                "Executive Summary": exec_summary,
                 "Key Decision Insight": decision,
                 "Core Metrics": metrics,
                 "Critical Alerts": critical_alerts,
@@ -68,6 +70,79 @@ class ExecutiveNarrativeComposer:
                 },
             },
         }
+
+    def _build_executive_summary(
+        self,
+        metrics: Dict[str, Any],
+        scores: NarrativeScores,
+        verdict_label: str,
+    ) -> str:
+        """Build a proper paragraph executive summary in plain English."""
+        row_count = metrics.get("row_count", 0)
+        breakdown_freq = metrics.get("breakdown_frequency", 0)
+        downtime_hours = metrics.get("downtime_total_hours", 0.0)
+        critical_count = metrics.get("critical_alert_count", 0)
+        warning_count = metrics.get("warning_alert_count", 0)
+        total_insights = metrics.get("total_insights", 0)
+        root_cause_pct = metrics.get("root_cause_completeness_pct", 0.0)
+        repeat_machines = metrics.get("repeat_machine_count", 0)
+
+        parts = []
+
+        # Opening sentence
+        parts.append(
+            f"This analysis reviewed {row_count} records and identified "
+            f"{total_insights} areas of concern."
+        )
+
+        # Most urgent finding
+        if critical_count > 0:
+            parts.append(
+                f"The most urgent finding requires immediate attention \u2014 "
+                f"{critical_count} item(s) have been flagged as needing action now."
+            )
+
+        # Downtime context
+        if downtime_hours > 0:
+            parts.append(
+                f"Total recorded downtime across the dataset is approximately "
+                f"{round(downtime_hours, 1)} hours."
+            )
+
+        # Repeat failures
+        if repeat_machines > 0:
+            parts.append(
+                f"There are {repeat_machines} piece(s) of equipment that have experienced "
+                f"breakdowns more than once, suggesting root causes may not be fully resolved."
+            )
+
+        # Root cause gaps
+        if root_cause_pct < 70:
+            parts.append(
+                f"Root cause documentation is incomplete \u2014 only {round(root_cause_pct)}% "
+                f"of breakdown records have a root cause recorded. Without this information, "
+                f"it is difficult to prevent repeat failures."
+            )
+
+        # Risk verdict
+        if scores.risk_score >= 0.8:
+            parts.append(
+                "Overall, the facility is running at elevated risk and requires "
+                "immediate corrective action to prevent further breakdowns."
+            )
+        elif scores.risk_score >= 0.5:
+            parts.append(
+                "Immediate priorities are reviewing the flagged records, scheduling "
+                "preventive maintenance on top-failing equipment, and improving root "
+                "cause documentation across all breakdown reports."
+            )
+        else:
+            parts.append(
+                "The facility is in a manageable state. Continue current maintenance "
+                "practices and monitor the key indicators highlighted in this report."
+            )
+
+        return " ".join(parts)
 
     def build_narrative_insight(
         self,
@@ -85,7 +160,7 @@ class ExecutiveNarrativeComposer:
             "source": "EXECUTIVE",
             "severity": severity,
             "resource": "SYSTEM",
-            "title": "Executive Intelligence Narrative",
+            "title": "Executive Intelligence Summary",
             "description": narrative["sections"]["Executive Summary"],
             "remediation": narrative["sections"]["Key Decision Insight"],
             "priority_score": risk_score,
@@ -190,17 +265,19 @@ class ExecutiveNarrativeComposer:
     def _build_decision(self, scores: NarrativeScores, metrics: Dict[str, Any]) -> str:
         if scores.risk_score >= 0.8:
             return (
-                "Immediate intervention required: prioritize high-risk equipment, "
-                "schedule urgent maintenance actions, and monitor anomaly signals daily."
+                "Immediate intervention is required. Prioritize high-risk equipment, "
+                "schedule urgent maintenance, and review all critical findings today."
             )
         if scores.risk_score >= 0.5:
             return (
-                "Elevated risk detected: execute targeted preventive maintenance "
-                "on repeat-failure assets and close root-cause documentation gaps."
+                "There are several areas that need attention soon. Focus on equipment "
+                "with repeat failures and make sure root cause documentation is complete "
+                "for all recent breakdowns."
             )
         return (
-            "System risk is controlled: continue preventive maintenance cadence, "
-            "track anomaly drift, and optimize technician allocation."
+            "The situation is under control. Continue your current maintenance schedule, "
+            "keep an eye on the trends highlighted in this report, and ensure your team "
+            "documents root causes for every breakdown."
         )
 
     def _build_critical_alerts(self, unified_insights: List[Dict[str, Any]]) -> List[str]:
@@ -211,20 +288,37 @@ class ExecutiveNarrativeComposer:
         ]
         if critical:
             return critical[:5]
-        return ["No critical alerts generated for this run."]
+        return ["No critical alerts for this analysis."]
 
     def _build_machine_intelligence(self, metrics: Dict[str, Any]) -> List[str]:
-        return [
-            f"Repeat machine detections: {metrics['repeat_machine_count']}.",
-            (
-                "Root cause completeness is "
-                f"{metrics['root_cause_completeness_pct']:.2f}%."
-            ),
-            (
-                "Maintenance mix is "
-                f"{metrics['reactive_count']} reactive vs {metrics['preventive_count']} preventive."
-            ),
-        ]
+        items = []
+        repeat = metrics.get("repeat_machine_count", 0)
+        if repeat > 0:
+            items.append(
+                f"{repeat} piece(s) of equipment have experienced breakdowns more than once."
+            )
+        else:
+            items.append("No repeat breakdowns detected on the same equipment.")
+
+        root_pct = metrics.get("root_cause_completeness_pct", 0.0)
+        if root_pct < 70:
+            items.append(
+                f"Root cause documentation is only {round(root_pct)}% complete. "
+                f"Improving this will help prevent repeat failures."
+            )
+        else:
+            items.append(
+                f"Root cause documentation is {round(root_pct)}% complete \u2014 good practice."
+            )
+
+        reactive = metrics.get("reactive_count", 0)
+        preventive = metrics.get("preventive_count", 0)
+        if reactive > 0 or preventive > 0:
+            items.append(
+                f"Maintenance is split {reactive} reactive vs {preventive} preventive actions."
+            )
+
+        return items
 
     def _build_predictive_insights(
         self,
@@ -236,15 +330,15 @@ class ExecutiveNarrativeComposer:
             ftype = str(finding.get("type", "")).upper()
             if ftype not in {"PREDICTION", "FORECAST", "RISK"}:
                 continue
-            predictive.append(str(finding.get("description", "")).strip())
+            desc = str(finding.get("description", "")).strip()
+            if desc:
+                predictive.append(desc)
 
         if not predictive:
+            label = self._risk_label(scores.risk_score).lower()
             predictive = [
-                (
-                    "ML models indicate a "
-                    f"{self._risk_label(scores.risk_score).lower()} risk trajectory "
-                    f"with confidence {scores.prediction_confidence:.2%}."
-                )
+                f"The analysis indicates a {label} risk trajectory. "
+                f"Continue monitoring key indicators for any changes."
             ]
         return predictive[:5]
 
@@ -257,33 +351,38 @@ class ExecutiveNarrativeComposer:
 
         if float(metrics.get("root_cause_completeness_pct", 0.0)) < 80.0:
             opportunities.append(
-                "Increase root cause capture quality to improve failure recurrence control."
+                "Improve root cause documentation on breakdown records. Without knowing "
+                "why failures happen, it is impossible to prevent them from recurring."
             )
         if float(metrics.get("preventive_ratio", 0.0)) < 0.45:
             opportunities.append(
-                "Shift maintenance strategy toward preventive tasks on repeat-failure machines."
+                "Shift maintenance strategy toward more preventive work, especially "
+                "on equipment that has broken down more than once."
             )
         if float(metrics.get("avg_downtime_hours", 0.0)) > 2.0:
             opportunities.append(
-                "Reduce mean downtime by pre-staging critical spare parts and technician assignments."
+                "Reduce average repair time by pre-staging critical spare parts "
+                "and ensuring technicians are assigned before breakdowns occur."
             )
         if scores.risk_score >= 0.6:
             opportunities.append(
-                "Create a high-risk watchlist and trigger escalation on anomaly score spikes."
+                "Create a watchlist of high-risk equipment and set up regular "
+                "inspections to catch problems before they become breakdowns."
             )
 
         if not opportunities:
             opportunities.append(
-                "Maintain current controls and monitor leading indicators for drift."
+                "Current practices are solid. Maintain your maintenance schedule and "
+                "continue monitoring the indicators in this report."
             )
         return opportunities
 
     def _verdict_text(self, scores: NarrativeScores) -> str:
         if scores.risk_score >= 0.8:
-            return "System is in a high-risk state and requires immediate corrective action."
+            return "The facility needs immediate corrective action to reduce breakdown risk."
         if scores.risk_score >= 0.5:
-            return "System is in a moderate-risk state with targeted intervention required."
-        return "System is in a controlled state with routine optimization opportunities."
+            return "There are areas of concern that need targeted attention soon."
+        return "The facility is operating within acceptable parameters."
 
     @staticmethod
     def _pick_numeric_series(

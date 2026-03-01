@@ -12,7 +12,7 @@
  *  - lastSaved timestamp shown in header via dashboardsUI.getLastSaved()
  */
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FiDownload,
@@ -349,7 +349,8 @@ const Dashboards = () => {
             <FiSave size={13} /> {saveSuccess ? "Saved!" : "Save"}
           </button>
           <button style={s.btn} onClick={() => navigate("/insights")}><FiEye size={13} /> Insights</button>
-          <button style={s.btn} onClick={() => navigate("/exports")}><FiDownload size={13} /> Export</button>
+          <button style={s.btn} onClick={() => navigate("/exports")}><FiDownload size={13} /> Exports</button>
+          <ExportDashboardButton runId={run.activeRunId} />
         </div>
       </header>
 
@@ -1013,8 +1014,8 @@ const s: Record<string, React.CSSProperties> = {
     color: "#9ca3af", display: "flex", padding: 2,
   },
 
-  // Canvas
-  canvas: { flex: 1, overflowY: "auto", padding: "20px 24px" },
+  // Canvas — MUST have explicit background color for html2canvas capture
+  canvas: { flex: 1, overflowY: "auto", padding: "20px 24px", backgroundColor: "#f3f4f6" },
   sectionHeader: {
     display: "flex", alignItems: "center", gap: 12, marginBottom: 14,
   },
@@ -1034,8 +1035,8 @@ const s: Record<string, React.CSSProperties> = {
     overflow: "hidden", transition: "box-shadow 0.15s ease",
   },
   cardMetric: {
-    background: "linear-gradient(135deg,#ffffff 60%,#f5f3ff)",
-    borderColor: "#ede9fe",
+    background: "#ffffff",
+    borderColor: "#e5e7eb",
   },
   cardDragOver: {
     boxShadow: "0 0 0 2px #6366f1",
@@ -1127,6 +1128,98 @@ const s: Record<string, React.CSSProperties> = {
     display: "inline-block", padding: "2px 8px", borderRadius: 999,
     fontSize: 10, fontWeight: 700, color: "#1d4ed8", background: "#dbeafe", border: "1px solid #bfdbfe",
   },
+};
+
+// ─── Export Dashboard Button ──────────────────────────────────────────────────
+
+const ExportDashboardButton = ({ runId }: { runId: string }) => {
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+
+  const handleExportDashboard = useCallback(async () => {
+    if (exporting || !runId) return;
+    setExporting(true);
+    setExportMsg(null);
+
+    try {
+      // Wait for charts to fully render
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const html2canvasModule = await import("html2canvas");
+      const html2canvas = html2canvasModule.default || html2canvasModule;
+
+      const target =
+        document.getElementById("dashboard-canvas") ||
+        document.querySelector("[data-dashboard-root]");
+
+      if (!target) {
+        setExportMsg("Dashboard not ready. Please wait and try again.");
+        setExporting(false);
+        return;
+      }
+
+      const canvas = await html2canvas(target as HTMLElement, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: "#f3f4f6",
+        logging: false,
+        // Wait for images to load
+        allowTaint: true,
+      });
+
+      const imageBase64 = canvas.toDataURL("image/png");
+      // Strip the data:image/png;base64, prefix
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
+      const res = await frontendApi.exportDashboardPdf(runId, base64Data);
+
+      if (res.success) {
+        setExportMsg("Dashboard exported successfully!");
+        setTimeout(() => setExportMsg(null), 4000);
+      } else {
+        setExportMsg(res.message || "Export failed");
+      }
+    } catch (err) {
+      setExportMsg(`Export error: ${err}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, runId]);
+
+  return (
+    <>
+      <button
+        style={{
+          ...s.btn,
+          background: exporting ? "#e0e7ff" : "#eef2ff",
+          color: "#4f46e5",
+          borderColor: "#c7d2fe",
+          cursor: exporting ? "not-allowed" : "pointer",
+          opacity: exporting ? 0.7 : 1,
+        }}
+        onClick={handleExportDashboard}
+        disabled={exporting}
+        title="Export current dashboard view as PDF"
+      >
+        <FiDownload size={13} />
+        {exporting ? "Capturing..." : "Export PDF"}
+      </button>
+      {exportMsg && (
+        <span
+          style={{
+            fontSize: 11,
+            color: exportMsg.includes("success") ? "#059669" : "#dc2626",
+            fontWeight: 500,
+            padding: "4px 8px",
+            borderRadius: 6,
+            background: exportMsg.includes("success") ? "#ecfdf5" : "#fef2f2",
+          }}
+        >
+          {exportMsg}
+        </span>
+      )}
+    </>
+  );
 };
 
 export default Dashboards;

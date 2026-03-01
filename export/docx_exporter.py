@@ -26,6 +26,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 from utils.paths import EXPORT_DIR
 from utils.logger import get_logger
@@ -43,6 +44,26 @@ BLUE = RGBColor(0x25, 0x63, 0xEB)
 GREEN = RGBColor(0x05, 0x96, 0x69)
 GRAY = RGBColor(0x6B, 0x72, 0x80)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+
+
+def _set_cell_bg(cell, hex_color: str) -> None:
+    """
+    Safely set a table cell background color.
+    Compatible with python-docx >= 1.2.0 (no get_or_add_tcPr).
+
+    This function manually finds or creates the w:tcPr element
+    and appends a w:shd child, avoiding the removed get_or_add API.
+    """
+    tc = cell._tc
+    tcPr = tc.find(qn('w:tcPr'))
+    if tcPr is None:
+        tcPr = OxmlElement('w:tcPr')
+        tc.insert(0, tcPr)
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), hex_color.replace('#', ''))
+    tcPr.append(shd)
 
 
 class DocxExporter:
@@ -64,7 +85,6 @@ class DocxExporter:
     ) -> str:
         """
         Generate a complete DOCX insights report.
-
         Returns the absolute file path of the generated .docx file.
         """
         target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
@@ -76,32 +96,15 @@ class DocxExporter:
         doc = Document()
         self._apply_default_font(doc)
 
-        # ── Cover Page ──
         self._add_cover_page(doc, run_id)
-
-        # ── Table of Contents placeholder ──
         self._add_toc(doc)
         doc.add_page_break()
-
-        # ── Executive Summary ──
         self._add_executive_summary(doc, unified_insights, narrative)
-
-        # ── Data Overview ──
         self._add_data_overview(doc, unified_insights, profiling_results)
-
-        # ── Key Findings ──
         self._add_key_findings(doc, unified_insights)
-
-        # ── Root Cause Analysis ──
         self._add_root_cause_table(doc, unified_insights)
-
-        # ── 3-Tier Recommendations ──
         self._add_recommendations(doc, unified_insights)
-
-        # ── Predictive Signals ──
         self._add_predictive_signals(doc, ml_findings or [])
-
-        # ── Footer ──
         self._add_footer(doc)
 
         doc.save(filename)
@@ -114,7 +117,6 @@ class DocxExporter:
 
     @staticmethod
     def _apply_default_font(doc: Document) -> None:
-        """Set document-wide default font."""
         style = doc.styles["Normal"]
         font = style.font
         font.name = "Calibri"
@@ -122,7 +124,6 @@ class DocxExporter:
         font.color.rgb = RGBColor(0x11, 0x18, 0x27)
 
     def _add_cover_page(self, doc: Document, run_id: str) -> None:
-        """Add professional cover page."""
         for _ in range(6):
             doc.add_paragraph("")
 
@@ -164,11 +165,9 @@ class DocxExporter:
 
     @staticmethod
     def _add_toc(doc: Document) -> None:
-        """Add an auto-updating Table of Contents field."""
         heading = doc.add_heading("Table of Contents", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
-        # Insert a Word TOC field
         paragraph = doc.add_paragraph()
         run = paragraph.add_run()
         fld_char_begin = run._element.makeelement(qn("w:fldChar"), {qn("w:fldCharType"): "begin"})
@@ -185,7 +184,7 @@ class DocxExporter:
 
         note = doc.add_paragraph()
         note.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = note.add_run("(Right-click → Update Field to refresh TOC)")
+        run = note.add_run("(Right-click \u2192 Update Field to refresh TOC)")
         run.font.size = Pt(9)
         run.font.color.rgb = GRAY
         run.italic = True
@@ -196,37 +195,30 @@ class DocxExporter:
         insights: List[Dict[str, Any]],
         narrative: Optional[Dict[str, Any]],
     ) -> None:
-        """Add executive summary section with styled box."""
         heading = doc.add_heading("Executive Summary", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
         critical = sum(1 for i in insights if str(i.get("severity", "")).upper() == "CRITICAL")
         warnings = sum(1 for i in insights if str(i.get("severity", "")).upper() == "WARNING")
-        info = len(insights) - critical - warnings
+        info_count = len(insights) - critical - warnings
 
-        # Summary box (using a single-cell table with shading)
+        # Summary box using safe cell background
         table = doc.add_table(rows=1, cols=1)
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         cell = table.cell(0, 0)
 
-        # Apply light blue background
-        shading = cell._element.makeelement(
-            qn("w:shd"),
-            {qn("w:fill"): "EFF6FF", qn("w:val"): "clear"},
-        )
-        cell._element.get_or_add(qn("w:tcPr")).append(shading)
+        # SAFE: use _set_cell_bg instead of broken get_or_add API
+        _set_cell_bg(cell, 'EFF6FF')
 
-        if narrative and narrative.get("executive_summary"):
-            cell.text = narrative["executive_summary"]
+        if narrative and isinstance(narrative, dict):
+            sections = narrative.get("sections", narrative)
+            exec_summary = sections.get("Executive Summary", "")
+            if exec_summary:
+                cell.text = str(exec_summary)
+            else:
+                cell.text = self._build_fallback_summary(len(insights), critical, warnings, info_count)
         else:
-            summary_lines = [
-                f"This report contains {len(insights)} findings from automated industrial intelligence analysis.",
-                f"",
-                f"• {critical} Critical finding(s) requiring immediate attention",
-                f"• {warnings} Warning(s) for investigation",
-                f"• {info} Informational observation(s)",
-            ]
-            cell.text = "\n".join(summary_lines)
+            cell.text = self._build_fallback_summary(len(insights), critical, warnings, info_count)
 
         for para in cell.paragraphs:
             for run in para.runs:
@@ -235,13 +227,26 @@ class DocxExporter:
 
         doc.add_paragraph("")
 
+    @staticmethod
+    def _build_fallback_summary(total: int, critical: int, warnings: int, info: int) -> str:
+        parts = [
+            f"This analysis identified {total} areas of concern across the dataset.",
+            "",
+        ]
+        if critical > 0:
+            parts.append(f"\u2022 {critical} item(s) need immediate attention")
+        if warnings > 0:
+            parts.append(f"\u2022 {warnings} item(s) worth investigating further")
+        if info > 0:
+            parts.append(f"\u2022 {info} informational observation(s) for awareness")
+        return "\n".join(parts)
+
     def _add_data_overview(
         self,
         doc: Document,
         insights: List[Dict[str, Any]],
         profiling: Optional[Dict[str, Any]],
     ) -> None:
-        """Add data overview table."""
         heading = doc.add_heading("Data Overview", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
@@ -258,7 +263,6 @@ class DocxExporter:
                 ("Health Score", f"{health.get('health_score', 0):.1f}%"),
             ])
 
-        # Collect unique resources and severities
         resources = set()
         severities: Dict[str, int] = {}
         for insight in insights:
@@ -271,13 +275,12 @@ class DocxExporter:
             overview_items.append((f"  {sev} Findings", str(count)))
 
         table = doc.add_table(rows=len(overview_items) + 1, cols=2)
-        table.style = "Light Grid Accent 1"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-        # Header row
-        for j, header in enumerate(["Metric", "Value"]):
+        for j, header_text in enumerate(["Metric", "Value"]):
             cell = table.cell(0, j)
-            cell.text = header
+            cell.text = header_text
+            _set_cell_bg(cell, '1F4E78')
             for run in cell.paragraphs[0].runs:
                 run.bold = True
                 run.font.color.rgb = WHITE
@@ -289,11 +292,9 @@ class DocxExporter:
         doc.add_paragraph("")
 
     def _add_key_findings(self, doc: Document, insights: List[Dict[str, Any]]) -> None:
-        """Add key findings with severity-colored indicators."""
         heading = doc.add_heading("Key Findings", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
-        # Sort by severity: CRITICAL first
         severity_order = {"CRITICAL": 0, "WARNING": 1, "INFO": 2}
         sorted_insights = sorted(
             insights,
@@ -304,36 +305,41 @@ class DocxExporter:
             doc.add_paragraph("No findings to report.")
             return
 
-        # Show top 25 findings in a table
-        display = sorted_insights[:25]
-        table = doc.add_table(rows=len(display) + 1, cols=5)
-        table.style = "Light Grid Accent 1"
+        sev_display = {
+            "CRITICAL": "Needs Immediate Attention",
+            "WARNING": "Worth Investigating",
+            "INFO": "For Your Information",
+        }
 
-        headers = ["#", "Severity", "Resource", "Description", "Confidence"]
+        display = sorted_insights[:25]
+        table = doc.add_table(rows=len(display) + 1, cols=4)
+
+        headers = ["#", "Priority", "Description", "Confidence"]
         for j, h in enumerate(headers):
             cell = table.cell(0, j)
             cell.text = h
+            _set_cell_bg(cell, '1F4E78')
             for run in cell.paragraphs[0].runs:
                 run.bold = True
+                run.font.color.rgb = WHITE
 
         for i, finding in enumerate(display, start=1):
             sev = str(finding.get("severity", "INFO")).upper()
             table.cell(i, 0).text = str(i)
 
             sev_cell = table.cell(i, 1)
-            sev_cell.text = sev
+            sev_cell.text = sev_display.get(sev, sev)
             color_map = {"CRITICAL": RED, "WARNING": AMBER, "INFO": GREEN}
             for run in sev_cell.paragraphs[0].runs:
                 run.font.color.rgb = color_map.get(sev, GRAY)
                 run.bold = True
 
-            table.cell(i, 2).text = str(finding.get("resource", ""))[:30]
-
+            # FULL description — NEVER truncated
             desc = finding.get("description", finding.get("message", ""))
-            table.cell(i, 3).text = str(desc)[:80]
+            table.cell(i, 2).text = str(desc)
 
             conf = finding.get("confidence", finding.get("priority_score", 0))
-            table.cell(i, 4).text = f"{float(conf):.0%}" if conf else "N/A"
+            table.cell(i, 3).text = f"{float(conf):.0%}" if conf else "N/A"
 
         if len(sorted_insights) > 25:
             doc.add_paragraph(
@@ -344,19 +350,23 @@ class DocxExporter:
         doc.add_paragraph("")
 
     def _add_root_cause_table(self, doc: Document, insights: List[Dict[str, Any]]) -> None:
-        """Add root cause analysis table."""
         heading = doc.add_heading("Root Cause Analysis", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
-        # Extract findings that have remediation or root cause data
+        sev_display = {
+            "CRITICAL": "Needs Attention",
+            "WARNING": "Worth Investigating",
+            "INFO": "For Your Information",
+        }
+
         root_causes = []
         for insight in insights:
             remediation = insight.get("remediation", insight.get("action", ""))
             if remediation:
                 root_causes.append({
                     "resource": insight.get("resource", "N/A"),
-                    "finding": str(insight.get("description", insight.get("message", "")))[:60],
-                    "root_cause": str(remediation)[:80],
+                    "finding": str(insight.get("description", insight.get("message", ""))),
+                    "root_cause": str(remediation),
                     "severity": str(insight.get("severity", "INFO")).upper(),
                 })
 
@@ -366,20 +376,21 @@ class DocxExporter:
 
         display = root_causes[:20]
         table = doc.add_table(rows=len(display) + 1, cols=4)
-        table.style = "Light Grid Accent 1"
 
-        for j, h in enumerate(["Resource", "Finding", "Root Cause / Action", "Severity"]):
+        for j, h in enumerate(["Resource", "Finding", "Recommended Action", "Priority"]):
             cell = table.cell(0, j)
             cell.text = h
+            _set_cell_bg(cell, '1F4E78')
             for run in cell.paragraphs[0].runs:
                 run.bold = True
+                run.font.color.rgb = WHITE
 
         for i, rc in enumerate(display, start=1):
             table.cell(i, 0).text = rc["resource"]
             table.cell(i, 1).text = rc["finding"]
             table.cell(i, 2).text = rc["root_cause"]
             sev_cell = table.cell(i, 3)
-            sev_cell.text = rc["severity"]
+            sev_cell.text = sev_display.get(rc["severity"], rc["severity"])
             color_map = {"CRITICAL": RED, "WARNING": AMBER, "INFO": GREEN}
             for run in sev_cell.paragraphs[0].runs:
                 run.font.color.rgb = color_map.get(rc["severity"], GRAY)
@@ -388,11 +399,9 @@ class DocxExporter:
         doc.add_paragraph("")
 
     def _add_recommendations(self, doc: Document, insights: List[Dict[str, Any]]) -> None:
-        """Add 3-tier recommendations: Immediate (red), Short-term (amber), Strategic (blue)."""
         heading = doc.add_heading("Recommendations", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
-        # Categorize
         immediate: List[str] = []
         short_term: List[str] = []
         strategic: List[str] = []
@@ -401,27 +410,34 @@ class DocxExporter:
             sev = str(insight.get("severity", "INFO")).upper()
             action = insight.get("remediation", insight.get("action", ""))
             if not action:
-                action = insight.get("description", insight.get("message", ""))
+                desc = insight.get("description", insight.get("message", ""))
+                if desc:
+                    action = f"Review and address: {desc}"
+                else:
+                    continue
 
-            action_str = str(action)[:120]
-            resource = insight.get("resource", "")
-            entry = f"[{resource}] {action_str}" if resource else action_str
+            action_str = str(action)
+            # Strip "[variable_name]" prefix pattern — show full sentence only
+            if action_str.startswith("[") and "]" in action_str:
+                action_str = action_str[action_str.index("]") + 1:].strip()
+                if not action_str:
+                    continue
 
             if sev == "CRITICAL":
-                immediate.append(entry)
+                immediate.append(action_str)
             elif sev == "WARNING":
-                short_term.append(entry)
+                short_term.append(action_str)
             else:
-                strategic.append(entry)
+                strategic.append(action_str)
 
         self._add_recommendation_tier(
-            doc, "Tier 1 — Immediate Action Required", immediate, RED
+            doc, "Tier 1 \u2014 Immediate Action Required", immediate, RED
         )
         self._add_recommendation_tier(
-            doc, "Tier 2 — Short-Term Investigation", short_term, AMBER
+            doc, "Tier 2 \u2014 Investigate This Week", short_term, AMBER
         )
         self._add_recommendation_tier(
-            doc, "Tier 3 — Strategic Improvement", strategic, BLUE
+            doc, "Tier 3 \u2014 Strategic Improvement", strategic, BLUE
         )
 
         doc.add_paragraph("")
@@ -433,13 +449,12 @@ class DocxExporter:
         items: List[str],
         color: RGBColor,
     ) -> None:
-        """Add a single recommendation tier with colored header."""
         heading = doc.add_heading(title, level=2)
         for run in heading.runs:
             run.font.color.rgb = color
 
         if not items:
-            p = doc.add_paragraph("No recommendations at this tier.")
+            p = doc.add_paragraph("No actions required at this level.")
             p.runs[0].font.color.rgb = GRAY
             p.runs[0].italic = True
             return
@@ -458,7 +473,6 @@ class DocxExporter:
         doc: Document,
         ml_findings: List[Dict[str, Any]],
     ) -> None:
-        """Add predictive signals section from ML findings."""
         heading = doc.add_heading("Predictive Signals", level=1)
         heading.runs[0].font.color.rgb = NAVY
 
@@ -466,27 +480,44 @@ class DocxExporter:
             doc.add_paragraph("No predictive signals generated for this run.")
             return
 
+        type_labels = {
+            "PREDICTION": "Prediction",
+            "FORECAST": "Forecast",
+            "RISK": "Risk Assessment",
+            "ANOMALY": "Anomaly Detection",
+        }
+        sev_display = {
+            "CRITICAL": "Needs Attention",
+            "WARNING": "Worth Investigating",
+            "INFO": "For Your Information",
+        }
+
         for finding in ml_findings[:10]:
             finding_type = finding.get("type", "PREDICTION")
             description = finding.get("description", "")
             confidence = finding.get("confidence", 0)
             severity = str(finding.get("severity", "INFO")).upper()
-            method = finding.get("detection_method", "Unknown")
 
             para = doc.add_paragraph()
-            # Bold type tag
-            run = para.add_run(f"[{finding_type}] ")
+            run = para.add_run(f"{type_labels.get(finding_type, finding_type)}: ")
             run.bold = True
             color_map = {"CRITICAL": RED, "WARNING": AMBER, "INFO": GREEN}
             run.font.color.rgb = color_map.get(severity, GRAY)
 
-            # Description
             run = para.add_run(str(description))
             run.font.size = Pt(10)
 
-            # Confidence + method
+            conf_val = float(confidence) if confidence else 0
+            if conf_val >= 0.8:
+                conf_label = "High confidence"
+            elif conf_val >= 0.5:
+                conf_label = "Moderate confidence"
+            else:
+                conf_label = "Low confidence"
+
             detail = doc.add_paragraph()
-            run = detail.add_run(f"   Confidence: {float(confidence):.0%} | Method: {method}")
+            sev_label = sev_display.get(severity, severity)
+            run = detail.add_run(f"   {conf_label} | {sev_label}")
             run.font.size = Pt(9)
             run.font.color.rgb = GRAY
 
@@ -494,7 +525,6 @@ class DocxExporter:
 
     @staticmethod
     def _add_footer(doc: Document) -> None:
-        """Add confidentiality footer to all sections."""
         date_str = datetime.now().strftime("%B %d, %Y")
         footer_text = f"Confidential | Offline Industrial Intelligence | {date_str}"
 

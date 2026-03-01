@@ -14,6 +14,7 @@ Ensemble scoring:
 Tested against: Breakdown_data.csv (57 rows × 7 numeric columns)
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -21,6 +22,45 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 
 from ml_engine.model_evaluator import ModelEvaluator
+
+
+def _humanize_column_name(raw_name: str) -> str:
+    """
+    Convert a raw column name like 'maint__notification' or 'breakdown_dur'
+    into a human-readable phrase like 'Maintenance Notification' or 'Breakdown Duration'.
+    """
+    name = str(raw_name).strip()
+    # Remove leading/trailing underscores and numeric prefixes
+    name = re.sub(r'^[_\d]+', '', name)
+    name = re.sub(r'[_]+$', '', name)
+    # Replace double/single underscores with space
+    name = name.replace('__', ' ').replace('_', ' ')
+    # Expand common abbreviations
+    abbreviations = {
+        'dur': 'Duration',
+        'hrs': 'Hours',
+        'cnt': 'Count',
+        'qty': 'Quantity',
+        'maint': 'Maintenance',
+        'equip': 'Equipment',
+        'freq': 'Frequency',
+        'avg': 'Average',
+        'temp': 'Temperature',
+        'pres': 'Pressure',
+        'desc': 'Description',
+        'num': 'Number',
+        'id': 'ID',
+        'dept': 'Department',
+    }
+    words = name.split()
+    expanded = []
+    for w in words:
+        lower = w.lower()
+        if lower in abbreviations:
+            expanded.append(abbreviations[lower])
+        else:
+            expanded.append(w.capitalize())
+    return ' '.join(expanded) if expanded else raw_name
 
 
 class AnomalyDetector:
@@ -85,7 +125,7 @@ class AnomalyDetector:
             + iqr_scores * self.iqr_weight
         )
 
-        # ── Generate findings ──
+        # ── Generate findings with PLAIN ENGLISH descriptions ──
         findings: List[Dict[str, Any]] = []
         for idx in range(len(matrix)):
             score = float(ensemble_scores[idx])
@@ -95,6 +135,7 @@ class AnomalyDetector:
             row_values = matrix.iloc[idx].abs()
             top_feature = str(row_values.idxmax())
             top_value = float(matrix.iloc[idx][top_feature])
+            human_name = _humanize_column_name(top_feature)
 
             severity = "CRITICAL" if score >= 0.8 else "WARNING"
             confidence = ModelEvaluator.confidence_from_anomaly_score(
@@ -102,7 +143,7 @@ class AnomalyDetector:
             )
             ts = feature_matrix.index[idx]
 
-            # Determine which methods flagged this row
+            # Determine which methods flagged this row (internal only)
             methods_triggered: List[str] = []
             if if_scores[idx] > 0.5:
                 methods_triggered.append("IsolationForest")
@@ -113,6 +154,11 @@ class AnomalyDetector:
 
             detection_method = "+".join(methods_triggered) if methods_triggered else "Ensemble"
 
+            # Build PLAIN ENGLISH description and action
+            description, action = self._build_plain_description(
+                human_name, top_value, score, severity
+            )
+
             findings.append(
                 {
                     "type": "ANOMALY",
@@ -121,11 +167,8 @@ class AnomalyDetector:
                     "confidence": confidence,
                     "anomaly_score": score,
                     "detection_method": detection_method,
-                    "description": (
-                        f"Anomalous behavior detected for '{top_feature}' "
-                        f"(value={top_value:.3f}, ensemble_score={score:.3f}). "
-                        f"Methods: {detection_method}."
-                    ),
+                    "description": description,
+                    "remediation": action,
                     "current_value": top_value,
                     "timestamp": str(ts),
                     "if_score": float(if_scores[idx]),
@@ -135,6 +178,53 @@ class AnomalyDetector:
             )
 
         return findings
+
+    @staticmethod
+    def _build_plain_description(
+        human_name: str,
+        value: float,
+        score: float,
+        severity: str,
+    ) -> tuple:
+        """
+        Build a plain English description and action for an anomaly finding.
+        Returns (description, action) tuple.
+        """
+        # Round the value to something readable
+        if abs(value) >= 1_000_000:
+            value_str = f"{value / 1_000_000:.1f} million"
+        elif abs(value) >= 1_000:
+            value_str = f"{value:,.0f}"
+        elif abs(value) >= 1:
+            value_str = f"{value:.1f}"
+        else:
+            value_str = f"{value:.2f}"
+
+        if severity == "CRITICAL":
+            description = (
+                f"An unusual value was found in '{human_name}' that is far outside "
+                f"the normal range for this dataset (recorded value: {value_str}). "
+                f"This could indicate a data entry error, a system malfunction, "
+                f"or a genuinely exceptional event that needs immediate review."
+            )
+            action = (
+                f"Investigate the '{human_name}' record immediately. "
+                f"Check if the value of {value_str} is correct or if it was entered in error. "
+                f"If correct, determine what caused this unusual reading and whether "
+                f"it signals an equipment issue."
+            )
+        else:
+            description = (
+                f"A value in '{human_name}' (recorded as {value_str}) is noticeably different "
+                f"from the typical pattern in this dataset. While not necessarily urgent, "
+                f"this kind of variation can sometimes be an early warning sign of developing issues."
+            )
+            action = (
+                f"Review the '{human_name}' data to confirm the recorded value is accurate. "
+                f"If this column tracks equipment readings, consider scheduling a routine check."
+            )
+
+        return description, action
 
     def _isolation_forest_scores(self, matrix: pd.DataFrame) -> np.ndarray:
         """
@@ -160,15 +250,11 @@ class AnomalyDetector:
         """
         means = matrix.mean()
         stds = matrix.std()
-        # Avoid division by zero
         stds = stds.replace(0, 1.0)
 
         z_matrix = ((matrix - means) / stds).abs()
-        # Per-row max Z-score
         max_z = z_matrix.max(axis=1).to_numpy()
 
-        # Map Z-scores to 0-1 range:
-        # Z < 2 → ~0, Z = 3 → 0.5, Z > 4 → ~1
         scores = np.clip((max_z - 2.0) / 2.0, 0.0, 1.0)
         return scores
 
@@ -181,16 +267,13 @@ class AnomalyDetector:
         q1 = matrix.quantile(0.25)
         q3 = matrix.quantile(0.75)
         iqr = q3 - q1
-        # Avoid zero IQR
         iqr = iqr.replace(0, 1e-6)
 
         lower_fence = q1 - 1.5 * iqr
         upper_fence = q3 + 1.5 * iqr
 
-        # Boolean matrix: True if value is an outlier
         outlier_mask = (matrix < lower_fence) | (matrix > upper_fence)
 
-        # Per-row: fraction of columns that are outliers
         scores = outlier_mask.sum(axis=1).to_numpy() / max(matrix.shape[1], 1)
         return scores.astype(float)
 

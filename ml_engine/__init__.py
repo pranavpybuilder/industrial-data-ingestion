@@ -53,17 +53,53 @@ class MLEngine:
         recurrence = self.recurrence_predictor.predict(downtime_signal)
         if recurrence is not None:
             probability = float(recurrence["probability"])
+            prob_pct = round(probability * 100)
+
+            # Plain English description for failure recurrence
+            if probability >= 0.75:
+                severity = "CRITICAL"
+                description = (
+                    f"There is a high chance (roughly {prob_pct}%) that equipment which recently "
+                    f"broke down will break down again in the near future. Recurring failures "
+                    f"on the same equipment usually point to an unresolved root cause \u2014 "
+                    f"fixing symptoms without fixing the cause leads to this pattern."
+                )
+                action = (
+                    "For each piece of equipment that broke down more than once, "
+                    "investigate and fix the underlying cause, not just the immediate symptom."
+                )
+            elif probability >= 0.5:
+                severity = "WARNING"
+                description = (
+                    f"There is a moderate chance (around {prob_pct}%) that some of the recently "
+                    f"failed equipment may break down again soon. This is worth monitoring closely "
+                    f"to catch repeat failures before they escalate."
+                )
+                action = (
+                    "Review equipment that has failed more than once recently and consider "
+                    "scheduling preventive maintenance before the next expected failure window."
+                )
+            else:
+                severity = "WARNING"
+                description = (
+                    f"The likelihood of repeat breakdowns in the near term is relatively "
+                    f"low (around {prob_pct}%). Current maintenance practices appear to be "
+                    f"keeping recurrence under control."
+                )
+                action = (
+                    "Continue current maintenance schedule and keep monitoring for any "
+                    "increase in repeat failure patterns."
+                )
+
             findings.append(
                 {
                     "type": "PREDICTION",
                     "feature_name": "failure_recurrence",
-                    "severity": "CRITICAL" if probability >= 0.75 else "WARNING",
+                    "severity": severity,
                     "confidence": float(recurrence["confidence"]),
                     "detection_method": "LogisticRegression",
-                    "description": (
-                        "Predicted near-term recurrence probability is "
-                        f"{probability:.2%}."
-                    ),
+                    "description": description,
+                    "remediation": action,
                     "current_value": probability,
                     "probability": probability,
                 }
@@ -84,7 +120,47 @@ class MLEngine:
         if forecast is not None:
             forecast_mean = float(forecast["forecast_mean"])
             baseline = float(downtime_signal.mean()) if len(downtime_signal) else 0.0
-            severity = "WARNING" if forecast_mean > baseline * 1.15 else "INFO"
+
+            # Round for readability
+            forecast_display = round(forecast_mean, 1)
+            baseline_display = round(baseline, 1)
+
+            # Plain English description for downtime forecast
+            if forecast_mean > baseline * 1.15:
+                severity = "WARNING"
+                description = (
+                    f"Based on recent breakdown trends, we expect approximately "
+                    f"{forecast_display} hours of equipment downtime in the coming period. "
+                    f"This is above the typical level of {baseline_display} hours and will "
+                    f"impact production if not addressed through preventive action."
+                )
+                action = (
+                    "Prioritize preventive maintenance on the highest-frequency failure "
+                    "equipment this week. Review the maintenance schedule with your team."
+                )
+            elif forecast_mean < baseline * 0.5 or forecast_mean < 1.0:
+                severity = "INFO"
+                description = (
+                    f"Current trends suggest downtime will remain low in the near term "
+                    f"(forecast: {forecast_display} hours vs typical {baseline_display} hours). "
+                    f"This is a positive sign \u2014 keep up the current maintenance practices."
+                )
+                action = (
+                    "Continue current preventive maintenance schedule and monitor for "
+                    "any changes in the downtime pattern."
+                )
+            else:
+                severity = "INFO"
+                description = (
+                    f"Equipment downtime is forecast at approximately {forecast_display} hours "
+                    f"for the coming period, which is in line with the recent average of "
+                    f"{baseline_display} hours. No significant change expected."
+                )
+                action = (
+                    "Maintain current maintenance schedule. No additional intervention "
+                    "is needed at this time."
+                )
+
             findings.append(
                 {
                     "type": "FORECAST",
@@ -92,10 +168,8 @@ class MLEngine:
                     "severity": severity,
                     "confidence": float(forecast["confidence"]),
                     "detection_method": "LinearRegression",
-                    "description": (
-                        f"Forecasted downtime mean for next window: "
-                        f"{forecast_mean:.3f} (baseline: {baseline:.3f})."
-                    ),
+                    "description": description,
+                    "remediation": action,
                     "current_value": forecast_mean,
                     "baseline": baseline,
                     "forecast_values": forecast["forecast_values"],
@@ -119,14 +193,51 @@ class MLEngine:
             recurrence=recurrence,
             forecast=forecast,
         )
+
+        # Plain English description for system risk
+        risk_pct = round(risk * 100)
+        if risk >= 0.8:
+            risk_sev = "CRITICAL"
+            risk_desc = (
+                "Looking across all the data, the combined picture of breakdowns, "
+                "downtime patterns, and failure recurrence suggests this facility is "
+                "running at elevated risk. Without intervention, the frequency of "
+                "breakdowns is likely to increase."
+            )
+            risk_action = (
+                "Review the top 3 most frequently failing equipment and schedule "
+                "targeted maintenance this month. Escalate to management."
+            )
+        elif risk >= 0.5:
+            risk_sev = "WARNING"
+            risk_desc = (
+                f"Overall equipment health is a moderate concern (risk level: {risk_pct}%). "
+                f"Some patterns in the data \u2014 such as repeat failures or rising downtime \u2014 "
+                f"suggest areas that need attention before they escalate into bigger problems."
+            )
+            risk_action = (
+                "Focus maintenance efforts on equipment showing repeat failures. "
+                "Review root cause documentation and fill in any gaps."
+            )
+        else:
+            risk_sev = "INFO"
+            risk_desc = (
+                "Overall, the data shows the facility is in a healthy operating state. "
+                "Breakdown frequency is manageable and patterns are relatively stable."
+            )
+            risk_action = (
+                "Maintain current maintenance schedule and monitor for any changes."
+            )
+
         findings.append(
             {
                 "type": "RISK",
                 "feature_name": "system_risk",
-                "severity": "CRITICAL" if risk >= 0.8 else "WARNING" if risk >= 0.5 else "INFO",
+                "severity": risk_sev,
                 "confidence": float(min(max(0.55 + risk * 0.4, 0.01), 0.99)),
                 "detection_method": "CompositeRisk",
-                "description": f"Composite system risk score is {risk:.3f}.",
+                "description": risk_desc,
+                "remediation": risk_action,
                 "current_value": risk,
             }
         )

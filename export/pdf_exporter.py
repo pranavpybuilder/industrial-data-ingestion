@@ -6,6 +6,7 @@ MODE 2: Dashboard-only PDF (A3 landscape, embed base64 PNG)
 MODE 4: Full Report PDF (insights A4 + dashboard image pages)
 
 Uses reportlab for all PDF generation. 100% offline.
+All table cells use Paragraph objects for proper text wrapping.
 """
 
 import base64
@@ -58,9 +59,16 @@ LIGHT_GRAY = colors.HexColor("#F3F4F6")
 WHITE = colors.white
 
 
+def _safe_str(val: Any, fallback: str = "") -> str:
+    """Safely convert a value to string, escaping XML-bad characters for Paragraph."""
+    text = str(val) if val else fallback
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 class PDFExporter:
     """
     Multi-mode PDF exporter for Industrial Intelligence reports.
+    All text uses Paragraph for proper wrapping — no truncation.
     """
 
     def __init__(self) -> None:
@@ -119,6 +127,30 @@ class PDFExporter:
             fontSize=8,
             textColor=GRAY_TEXT,
             alignment=TA_CENTER,
+        ))
+        # Cell styles for table content — wrappable
+        self.styles.add(ParagraphStyle(
+            name="CellNormal",
+            parent=self.styles["Normal"],
+            fontSize=9,
+            leading=12,
+            textColor=DARK_TEXT,
+        ))
+        self.styles.add(ParagraphStyle(
+            name="CellBold",
+            parent=self.styles["Normal"],
+            fontSize=9,
+            leading=12,
+            textColor=DARK_TEXT,
+            fontName="Helvetica-Bold",
+        ))
+        self.styles.add(ParagraphStyle(
+            name="CellHeaderWhite",
+            parent=self.styles["Normal"],
+            fontSize=10,
+            leading=13,
+            textColor=WHITE,
+            fontName="Helvetica-Bold",
         ))
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -203,7 +235,7 @@ class PDFExporter:
 
             # Header
             story.append(Paragraph(
-                f"Dashboard Visualization — Run: {run_id}",
+                f"Dashboard Visualization \u2014 Run: {_safe_str(run_id)}",
                 self.styles["CoverSubtitle"],
             ))
             story.append(Paragraph(
@@ -314,7 +346,7 @@ class PDFExporter:
 
             # Dashboard image page
             story.append(Paragraph(
-                f"Dashboard — Run: {run_id}",
+                f"Dashboard \u2014 Run: {_safe_str(run_id)}",
                 self.styles["CoverSubtitle"],
             ))
             story.append(Spacer(1, 0.5 * cm))
@@ -410,20 +442,62 @@ class PDFExporter:
         return story
 
     def _cover_page(self, run_id: str) -> list:
-        """Build cover page elements."""
+        """Build cover page with navy rectangle header block."""
         elements: list = []
-        elements.append(Spacer(1, 5 * cm))
-        elements.append(Paragraph("Industrial Intelligence Report", self.styles["CoverTitle"]))
-        elements.append(Paragraph("Offline Analysis & Insights", self.styles["CoverSubtitle"]))
-        elements.append(Spacer(1, 2 * cm))
-        elements.append(Paragraph(f"Run ID: {run_id}", self.styles["SmallGray"]))
-        elements.append(Paragraph(
-            datetime.now().strftime("%B %d, %Y"),
-            self.styles["SmallGray"],
-        ))
-        elements.append(Spacer(1, 1 * cm))
 
-        # Confidential badge
+        # ── Navy Block as a full-width table ──
+        # This renders a navy rectangle with white centered text
+        navy_title_style = ParagraphStyle(
+            "NavyCoverTitle", parent=self.styles["Title"],
+            fontSize=30, textColor=WHITE, alignment=TA_CENTER,
+            leading=36, spaceAfter=6,
+        )
+        navy_subtitle_style = ParagraphStyle(
+            "NavyCoverSubtitle", parent=self.styles["Heading2"],
+            fontSize=16, textColor=colors.HexColor("#BDD7EE"),
+            alignment=TA_CENTER, spaceAfter=4,
+        )
+        navy_small_style = ParagraphStyle(
+            "NavyCoverSmall", parent=self.styles["Normal"],
+            fontSize=11, textColor=colors.HexColor("#BDD7EE"),
+            alignment=TA_CENTER,
+        )
+
+        inner_content = [
+            Spacer(1, 2 * cm),
+            Paragraph("Industrial Intelligence Report", navy_title_style),
+            Spacer(1, 0.3 * cm),
+            Paragraph("Offline Analysis &amp; Insights", navy_subtitle_style),
+            Spacer(1, 1.2 * cm),
+            Paragraph(f"Run ID: {_safe_str(run_id)}", navy_small_style),
+            Paragraph(datetime.now().strftime("%B %d, %Y"), navy_small_style),
+            Spacer(1, 2 * cm),
+        ]
+
+        # Wrap in a single-cell table to get the navy background
+        cell_content = []
+        for elem in inner_content:
+            cell_content.append(elem)
+
+        navy_table_data = [[cell_content]]
+        navy_table = Table(navy_table_data, colWidths=[17 * cm])
+        navy_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+            ("BOX", (0, 0), (-1, -1), 0, NAVY),
+            ("LEFTPADDING", (0, 0), (-1, -1), 20),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 20),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        navy_table.hAlign = "CENTER"
+
+        elements.append(Spacer(1, 3 * cm))
+        elements.append(navy_table)
+        elements.append(Spacer(1, 1.5 * cm))
+
+        # Confidential badge below navy block
         conf_style = ParagraphStyle(
             "ConfBadge", parent=self.styles["Normal"],
             fontSize=10, textColor=RED_TEXT, alignment=TA_CENTER,
@@ -442,15 +516,31 @@ class PDFExporter:
         info_count = len(insights) - critical - warnings
 
         if narrative and narrative.get("executive_summary"):
-            summary_text = str(narrative["executive_summary"])
+            summary_text = _safe_str(narrative["executive_summary"])
         else:
+            # Human-readable fallback when no narrative engine ran
+            parts = []
+            if critical:
+                parts.append(
+                    f"{critical} issue{'s' if critical > 1 else ''} that need"
+                    f"{'s' if critical == 1 else ''} immediate attention"
+                )
+            if warnings:
+                parts.append(
+                    f"{warnings} area{'s' if warnings > 1 else ''} worth investigating"
+                )
+            if info_count:
+                parts.append(
+                    f"{info_count} informational observation{'s' if info_count > 1 else ''}"
+                )
+            joined = ", ".join(parts) if parts else "no notable findings"
             summary_text = (
-                f"This report contains {len(insights)} findings from automated "
-                f"industrial intelligence analysis. "
-                f"{critical} critical, {warnings} warnings, {info_count} informational."
+                f"This analysis reviewed the uploaded data and identified "
+                f"{joined}. Review the sections below for details and "
+                f"recommended actions."
             )
 
-        # Summary box
+        # Summary box — uses Paragraph for proper text wrapping
         box_data = [[Paragraph(summary_text, self.styles["Normal"])]]
         box_table = Table(box_data, colWidths=[16 * cm])
         box_table.setStyle(TableStyle([
@@ -465,14 +555,34 @@ class PDFExporter:
         elements.append(Spacer(1, 0.5 * cm))
 
         # Quick stats
+        sev_display = {
+            "CRITICAL": "Needs Immediate Attention",
+            "WARNING": "Worth Investigating",
+            "INFO": "For Your Information",
+        }
         stats_data = [
-            ["Metric", "Count"],
-            ["Critical", str(critical)],
-            ["Warning", str(warnings)],
-            ["Info", str(info_count)],
-            ["Total", str(len(insights))],
+            [
+                Paragraph("Priority Level", self.styles["CellHeaderWhite"]),
+                Paragraph("Count", self.styles["CellHeaderWhite"]),
+            ],
+            [
+                Paragraph(sev_display["CRITICAL"], self.styles["CellNormal"]),
+                Paragraph(str(critical), self.styles["CellNormal"]),
+            ],
+            [
+                Paragraph(sev_display["WARNING"], self.styles["CellNormal"]),
+                Paragraph(str(warnings), self.styles["CellNormal"]),
+            ],
+            [
+                Paragraph(sev_display["INFO"], self.styles["CellNormal"]),
+                Paragraph(str(info_count), self.styles["CellNormal"]),
+            ],
+            [
+                Paragraph("<b>Total</b>", self.styles["CellBold"]),
+                Paragraph(f"<b>{len(insights)}</b>", self.styles["CellBold"]),
+            ],
         ]
-        stats_table = Table(stats_data, colWidths=[8 * cm, 4 * cm])
+        stats_table = Table(stats_data, colWidths=[10 * cm, 4 * cm])
         stats_table.setStyle(self._header_table_style())
         elements.append(stats_table)
         elements.append(Spacer(1, 0.5 * cm))
@@ -485,18 +595,38 @@ class PDFExporter:
         """Data overview with profiling stats."""
         elements: list = []
 
-        rows = [["Metric", "Value"]]
-        rows.append(["Total Findings", str(len(insights))])
-        rows.append(["Generated", datetime.now().strftime("%Y-%m-%d %H:%M")])
+        rows = [
+            [
+                Paragraph("Metric", self.styles["CellHeaderWhite"]),
+                Paragraph("Value", self.styles["CellHeaderWhite"]),
+            ]
+        ]
+        rows.append([
+            Paragraph("Total Findings", self.styles["CellNormal"]),
+            Paragraph(str(len(insights)), self.styles["CellNormal"]),
+        ])
+        rows.append([
+            Paragraph("Generated", self.styles["CellNormal"]),
+            Paragraph(datetime.now().strftime("%Y-%m-%d %H:%M"), self.styles["CellNormal"]),
+        ])
 
         if profiling:
             cols = profiling.get("columns", {})
             health = profiling.get("quality_metrics", {})
-            rows.append(["Columns Profiled", str(len(cols))])
-            rows.append(["Health Score", f"{health.get('health_score', 0):.1f}%"])
+            rows.append([
+                Paragraph("Columns Profiled", self.styles["CellNormal"]),
+                Paragraph(str(len(cols)), self.styles["CellNormal"]),
+            ])
+            rows.append([
+                Paragraph("Health Score", self.styles["CellNormal"]),
+                Paragraph(f"{health.get('health_score', 0):.1f}%", self.styles["CellNormal"]),
+            ])
 
         resources = set(i.get("resource", "N/A") for i in insights)
-        rows.append(["Affected Resources", str(len(resources))])
+        rows.append([
+            Paragraph("Affected Resources", self.styles["CellNormal"]),
+            Paragraph(str(len(resources)), self.styles["CellNormal"]),
+        ])
 
         table = Table(rows, colWidths=[9 * cm, 7 * cm])
         table.setStyle(self._header_table_style())
@@ -506,7 +636,8 @@ class PDFExporter:
         return elements
 
     def _findings_section(self, insights: List[Dict]) -> list:
-        """Key findings table with severity colors."""
+        """Key findings table with severity colors.
+        ALL text uses Paragraph for proper wrapping — NEVER truncated."""
         elements: list = []
         severity_order = {"CRITICAL": 0, "WARNING": 1, "INFO": 2}
         sorted_insights = sorted(
@@ -518,29 +649,56 @@ class PDFExporter:
             elements.append(Paragraph("No findings to report.", self.styles["Normal"]))
             return elements
 
+        sev_display = {
+            "CRITICAL": "Needs Attention",
+            "WARNING": "Worth Investigating",
+            "INFO": "For Info",
+        }
+
         display = sorted_insights[:30]
-        header = ["#", "Severity", "Resource", "Description", "Conf."]
+        header = [
+            Paragraph("#", self.styles["CellHeaderWhite"]),
+            Paragraph("Priority", self.styles["CellHeaderWhite"]),
+            Paragraph("Description", self.styles["CellHeaderWhite"]),
+            Paragraph("Confidence", self.styles["CellHeaderWhite"]),
+        ]
         rows = [header]
 
         for i, f in enumerate(display, 1):
             sev = str(f.get("severity", "INFO")).upper()
-            desc = str(f.get("description", f.get("message", "")))[:60]
+            # FULL description — NO truncation
+            desc = _safe_str(f.get("description", f.get("message", "")))
             conf = f.get("confidence", f.get("priority_score", 0))
             conf_str = f"{float(conf):.0%}" if conf else "N/A"
-            rows.append([str(i), sev, str(f.get("resource", ""))[:20], desc, conf_str])
 
-        col_widths = [1 * cm, 2 * cm, 3 * cm, 8 * cm, 2 * cm]
+            # Styled severity label
+            sev_label = sev_display.get(sev, sev)
+            sev_color = (
+                "#DC2626" if sev == "CRITICAL"
+                else "#D97306" if sev == "WARNING"
+                else "#059669"
+            )
+
+            rows.append([
+                Paragraph(str(i), self.styles["CellNormal"]),
+                Paragraph(
+                    f'<font color="{sev_color}"><b>{sev_label}</b></font>',
+                    self.styles["CellNormal"],
+                ),
+                Paragraph(desc, self.styles["CellNormal"]),
+                Paragraph(conf_str, self.styles["CellNormal"]),
+            ])
+
+        col_widths = [1 * cm, 3 * cm, 10 * cm, 2 * cm]
         table = Table(rows, colWidths=col_widths)
         style_cmds = list(self._header_table_style().getCommands())
 
-        # Color-code severity cells
+        # Color-code severity cells background
         for row_idx in range(1, len(rows)):
-            sev = rows[row_idx][1]
-            if sev == "CRITICAL":
-                style_cmds.append(("TEXTCOLOR", (1, row_idx), (1, row_idx), RED_TEXT))
+            sev_text = str(sorted_insights[row_idx - 1].get("severity", "INFO")).upper()
+            if sev_text == "CRITICAL":
                 style_cmds.append(("BACKGROUND", (1, row_idx), (1, row_idx), RED_BG))
-            elif sev == "WARNING":
-                style_cmds.append(("TEXTCOLOR", (1, row_idx), (1, row_idx), AMBER_TEXT))
+            elif sev_text == "WARNING":
                 style_cmds.append(("BACKGROUND", (1, row_idx), (1, row_idx), AMBER_BG))
 
         table.setStyle(TableStyle(style_cmds))
@@ -556,7 +714,7 @@ class PDFExporter:
         return elements
 
     def _root_cause_section(self, insights: List[Dict]) -> list:
-        """Root cause analysis table."""
+        """Root cause analysis table. ALL text wrapped with Paragraph — no truncation."""
         elements: list = []
 
         root_causes = []
@@ -564,9 +722,9 @@ class PDFExporter:
             remediation = i.get("remediation", i.get("action", ""))
             if remediation:
                 root_causes.append({
-                    "resource": str(i.get("resource", "N/A"))[:20],
-                    "finding": str(i.get("description", i.get("message", "")))[:50],
-                    "cause": str(remediation)[:60],
+                    "resource": _safe_str(i.get("resource", "N/A")),
+                    "finding": _safe_str(i.get("description", i.get("message", ""))),
+                    "cause": _safe_str(remediation),
                     "severity": str(i.get("severity", "INFO")).upper(),
                 })
 
@@ -576,10 +734,38 @@ class PDFExporter:
             ))
             return elements
 
-        header = ["Resource", "Finding", "Root Cause / Action", "Severity"]
+        header = [
+            Paragraph("Resource", self.styles["CellHeaderWhite"]),
+            Paragraph("Finding", self.styles["CellHeaderWhite"]),
+            Paragraph("Recommended Action", self.styles["CellHeaderWhite"]),
+            Paragraph("Priority", self.styles["CellHeaderWhite"]),
+        ]
         rows = [header]
+
+        sev_display = {
+            "CRITICAL": "Needs Attention",
+            "WARNING": "Investigate",
+            "INFO": "For Info",
+        }
+
         for rc in root_causes[:20]:
-            rows.append([rc["resource"], rc["finding"], rc["cause"], rc["severity"]])
+            sev = rc["severity"]
+            sev_label = sev_display.get(sev, sev)
+            sev_color = (
+                "#DC2626" if sev == "CRITICAL"
+                else "#D97306" if sev == "WARNING"
+                else "#059669"
+            )
+
+            rows.append([
+                Paragraph(rc["resource"], self.styles["CellNormal"]),
+                Paragraph(rc["finding"], self.styles["CellNormal"]),
+                Paragraph(rc["cause"], self.styles["CellNormal"]),
+                Paragraph(
+                    f'<font color="{sev_color}"><b>{sev_label}</b></font>',
+                    self.styles["CellNormal"],
+                ),
+            ])
 
         table = Table(rows, colWidths=[3 * cm, 5 * cm, 6 * cm, 2 * cm])
         table.setStyle(self._header_table_style())
@@ -589,7 +775,7 @@ class PDFExporter:
         return elements
 
     def _recommendations_section(self, insights: List[Dict]) -> list:
-        """3-tier recommendations section."""
+        """3-tier recommendations section. Full sentences — no truncation, no [resource] prefix."""
         elements: list = []
 
         immediate: list = []
@@ -598,21 +784,32 @@ class PDFExporter:
 
         for i in insights:
             sev = str(i.get("severity", "INFO")).upper()
-            action = str(i.get("remediation", i.get("action", i.get("description", ""))))[:100]
-            resource = i.get("resource", "")
-            entry = f"[{resource}] {action}" if resource else action
+            action = i.get("remediation", i.get("action", ""))
+            if not action:
+                desc = i.get("description", i.get("message", ""))
+                if desc:
+                    action = f"Review and address: {desc}"
+                else:
+                    continue
+
+            action_str = str(action)
+            # Strip "[variable_name]" prefix pattern
+            if action_str.startswith("[") and "]" in action_str:
+                action_str = action_str[action_str.index("]") + 1:].strip()
+                if not action_str:
+                    continue
 
             if sev == "CRITICAL":
-                immediate.append(entry)
+                immediate.append(action_str)
             elif sev == "WARNING":
-                short_term.append(entry)
+                short_term.append(action_str)
             else:
-                strategic.append(entry)
+                strategic.append(action_str)
 
         tiers = [
-            ("Tier 1 — Immediate Action", immediate, RED_TEXT, RED_BG),
-            ("Tier 2 — Short-Term Investigation", short_term, AMBER_TEXT, AMBER_BG),
-            ("Tier 3 — Strategic Improvement", strategic, BLUE_TEXT, BLUE_BG),
+            ("Tier 1 \u2014 Immediate Action Required", immediate, RED_TEXT, RED_BG),
+            ("Tier 2 \u2014 Investigate This Week", short_term, AMBER_TEXT, AMBER_BG),
+            ("Tier 3 \u2014 Strategic Improvement", strategic, BLUE_TEXT, BLUE_BG),
         ]
 
         for title, items, text_color, bg_color in tiers:
@@ -624,16 +821,20 @@ class PDFExporter:
             elements.append(Paragraph(title, header_style))
 
             if items:
-                for item in items[:8]:
-                    elements.append(Paragraph(f"• {item}", self.styles["Normal"]))
-                if len(items) > 8:
+                for item in items[:10]:
+                    # FULL text — uses Paragraph for wrapping
                     elements.append(Paragraph(
-                        f"  ... and {len(items) - 8} more",
+                        f"\u2022 {_safe_str(item)}",
+                        self.styles["Normal"],
+                    ))
+                if len(items) > 10:
+                    elements.append(Paragraph(
+                        f"  ... and {len(items) - 10} more",
                         self.styles["SmallGray"],
                     ))
             else:
                 elements.append(Paragraph(
-                    "No recommendations at this tier.",
+                    "No actions required at this level.",
                     self.styles["SmallGray"],
                 ))
             elements.append(Spacer(1, 0.3 * cm))
@@ -641,7 +842,7 @@ class PDFExporter:
         return elements
 
     def _predictive_section(self, ml_findings: List[Dict]) -> list:
-        """Predictive signals from ML engine."""
+        """Predictive signals — plain English, no algorithm names."""
         elements: list = []
 
         if not ml_findings:
@@ -650,25 +851,49 @@ class PDFExporter:
             ))
             return elements
 
+        type_labels = {
+            "PREDICTION": "Prediction",
+            "FORECAST": "Forecast",
+            "RISK": "Risk Assessment",
+            "ANOMALY": "Anomaly Detection",
+        }
+        sev_display = {
+            "CRITICAL": "Needs Attention",
+            "WARNING": "Worth Investigating",
+            "INFO": "For Your Information",
+        }
+
         for finding in ml_findings[:10]:
             f_type = finding.get("type", "PREDICTION")
-            desc = finding.get("description", "")
+            desc = _safe_str(finding.get("description", ""))
             conf = finding.get("confidence", 0)
-            method = finding.get("detection_method", "Unknown")
             sev = str(finding.get("severity", "INFO")).upper()
 
             color = RED_TEXT if sev == "CRITICAL" else AMBER_TEXT if sev == "WARNING" else GREEN_TEXT
 
+            type_label = type_labels.get(f_type, f_type)
+            sev_label = sev_display.get(sev, sev)
+
             tag_style = ParagraphStyle(
-                f"tag_{f_type}", parent=self.styles["Normal"],
+                f"tag_{f_type}_{id(finding)}", parent=self.styles["Normal"],
                 textColor=color, fontSize=10,
             )
             elements.append(Paragraph(
-                f"<b>[{f_type}]</b> {desc}",
+                f"<b>{type_label}:</b> {desc}",
                 tag_style,
             ))
+
+            # Confidence in plain English
+            conf_val = float(conf) if conf else 0
+            if conf_val >= 0.8:
+                conf_label = "High confidence"
+            elif conf_val >= 0.5:
+                conf_label = "Moderate confidence"
+            else:
+                conf_label = "Low confidence"
+
             elements.append(Paragraph(
-                f"   Confidence: {float(conf):.0%} | Method: {method}",
+                f"   {conf_label} | {sev_label}",
                 self.styles["SmallGray"],
             ))
             elements.append(Spacer(1, 0.2 * cm))
