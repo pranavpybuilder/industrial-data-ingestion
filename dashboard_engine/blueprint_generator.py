@@ -67,29 +67,41 @@ class BlueprintGenerator:
         blueprint = DashboardBlueprint(run_id)
         
         try:
-            # Section 1: Key Metrics (CRITICAL insights)
+            profiles = profiling_results if isinstance(profiling_results, dict) else {}
+
+            # ── Row 1: KPI Overview (always first) ──────────────
+            kpi_section = self._create_kpi_section(profiles, unified_insights)
+            blueprint.sections.append(kpi_section)
+
+            # ── Row 2: Charts row (bar chart 8-col + donut 4-col) ──
+            chart_section = self._create_topn_chart_section(profiles)
+            if chart_section:
+                blueprint.sections.append(chart_section)
+
+            donut_section = self._create_donut_chart_section(profiles)
+            if donut_section:
+                blueprint.sections.append(donut_section)
+
+            # ── Row 3: Data Summary Table ──────────────────────
+            summary_section = self._create_data_summary_table_section(profiles)
+            if summary_section:
+                blueprint.sections.append(summary_section)
+
+            # ── Row 4: Data Quality cards (compact) ───────────
+            if profiles:
+                quality_section = self._create_quality_section(profiles)
+                blueprint.sections.append(quality_section)
+
+            # ── Row 5: Critical Alerts (if any) ───────────────
             critical_insights = [
                 i for i in unified_insights 
                 if i.get("severity") == "CRITICAL"
             ]
-            
             if critical_insights:
                 metrics_section = self._create_metrics_section(critical_insights)
                 blueprint.sections.append(metrics_section)
-            
-            # Section 2: Data Quality (from profiling)
-            if profiling_results:
-                quality_section = self._create_quality_section(profiling_results)
-                blueprint.sections.append(quality_section)
-            
-            # Section 3: Insights by Resource
-            resource_groups = self.layout_rules.group_by_resource(unified_insights)
-            
-            for resource, insights in resource_groups.items():
-                resource_section = self._create_resource_section(resource, insights)
-                blueprint.sections.append(resource_section)
-            
-            # Section 4: All Insights (tabular)
+
+            # ── Row 6: All Insights table ─────────────────────
             if unified_insights:
                 all_insights_section = self._create_insights_section(unified_insights)
                 blueprint.sections.append(all_insights_section)
@@ -115,6 +127,268 @@ class BlueprintGenerator:
             return blueprint
     
     
+    # ─────────────────────────────────────────────────────────
+    # NEW: KPI Overview Section
+    # ─────────────────────────────────────────────────────────
+
+    def _create_kpi_section(self, profiles: Dict[str, Any],
+                            insights: List[Dict]) -> Dict[str, Any]:
+        """Create KPI overview cards with data health score."""
+
+        total_cols = 0
+        numeric_cols = 0
+        text_cols = 0
+        total_rows_val = 0
+        total_missing = 0
+        total_cells = 0
+        top_col_name = "—"
+        top_col_mean = 0.0
+
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            total_cols += 1
+            row_count = int(col_prof.get("count", col_prof.get("non_null_count", 0)))
+            total_rows_val = max(total_rows_val, row_count)
+            null_ct = int(col_prof.get("null_count", 0))
+            total_missing += null_ct
+            total_cells += row_count + null_ct
+
+            dtype = str(col_prof.get("detected_type", "")).lower()
+            mean_v = col_prof.get("mean")
+            is_numeric = dtype in ("numeric", "float", "int", "integer", "number") or (
+                mean_v is not None and isinstance(mean_v, (int, float))
+            )
+            if is_numeric:
+                numeric_cols += 1
+                if isinstance(mean_v, (int, float)) and abs(mean_v) > abs(top_col_mean):
+                    top_col_mean = mean_v
+                    top_col_name = str(col_name).replace("_", " ").title()
+            else:
+                text_cols += 1
+
+        # Data health score = % non-missing cells
+        health_pct = round(100.0 * (1.0 - total_missing / max(total_cells, 1)), 1)
+
+        widgets = [
+            {
+                "id": "kpi_total_rows",
+                "type": "kpi",
+                "title": "Total Rows",
+                "value": total_rows_val,
+                "icon": "rows",
+                "color": "#6366f1",
+            },
+            {
+                "id": "kpi_total_columns",
+                "type": "kpi",
+                "title": "Total Columns",
+                "value": total_cols,
+                "icon": "columns",
+                "color": "#8b5cf6",
+            },
+            {
+                "id": "kpi_data_health",
+                "type": "kpi",
+                "title": "Data Health",
+                "value": f"{health_pct}%",
+                "icon": "heart",
+                "color": "#10b981" if health_pct >= 90 else "#f59e0b" if health_pct >= 70 else "#ef4444",
+            },
+            {
+                "id": "kpi_missing_values",
+                "type": "kpi",
+                "title": "Missing Values",
+                "value": total_missing,
+                "icon": "alert",
+                "color": "#ef4444" if total_missing > 0 else "#10b981",
+            },
+            {
+                "id": "kpi_insights_count",
+                "type": "kpi",
+                "title": "Insights Found",
+                "value": len(insights),
+                "icon": "lightbulb",
+                "color": "#f59e0b",
+            },
+            {
+                "id": "kpi_top_column",
+                "type": "kpi",
+                "title": "Top Column",
+                "value": top_col_name,
+                "subtitle": f"avg: {round(top_col_mean, 2)}",
+                "icon": "trending_up",
+                "color": "#3b82f6",
+            },
+        ]
+
+        return {
+            "id": f"section_kpi_{uuid.uuid4().hex[:8]}",
+            "title": "📊 Overview",
+            "type": "kpi_row",
+            "widgets": widgets,
+            "layout": {"columns": len(widgets)},
+        }
+
+    # ─────────────────────────────────────────────────────────
+    # NEW: Top-N Bar Chart Section
+    # ─────────────────────────────────────────────────────────
+
+    def _create_topn_chart_section(self, profiles: Dict[str, Any],
+                                   top_n: int = 10) -> Optional[Dict[str, Any]]:
+        """Create horizontal bar chart of the top-N numeric columns by mean."""
+
+        entries = []
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            mean_v = col_prof.get("mean")
+            if mean_v is None or not isinstance(mean_v, (int, float)):
+                continue
+            entries.append({
+                "label": str(col_name).replace("_", " ").title(),
+                "column": col_name,
+                "value": round(float(mean_v), 2),
+            })
+
+        if not entries:
+            return None
+
+        # Sort by absolute value descending
+        entries.sort(key=lambda e: abs(e["value"]), reverse=True)
+        chart_data = entries[:top_n]
+
+        widget = {
+            "id": "chart_topn_columns",
+            "type": "bar_chart",
+            "title": f"Top {len(chart_data)} Columns by Average Value",
+            "chart_config": {
+                "orientation": "horizontal",
+                "color": "#6366f1",
+                "showValues": True,
+            },
+            "data": chart_data,
+        }
+
+        return {
+            "id": f"section_topn_{uuid.uuid4().hex[:8]}",
+            "title": "📈 Top Columns by Average",
+            "type": "chart",
+            "widgets": [widget],
+            "layout": {"fullWidth": True},
+        }
+
+    # ─────────────────────────────────────────────────────────
+    # NEW: Donut Chart — Column Type Distribution
+    # ─────────────────────────────────────────────────────────
+
+    def _create_donut_chart_section(self, profiles: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create donut/pie chart showing column type breakdown."""
+
+        type_counts: Dict[str, int] = {}
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            dtype = str(col_prof.get("detected_type", "unknown")).lower()
+            mean_v = col_prof.get("mean")
+            if dtype in ("numeric", "float", "int", "integer", "number") or (
+                mean_v is not None and isinstance(mean_v, (int, float))
+            ):
+                category = "Numeric"
+            elif dtype in ("datetime", "date", "timestamp"):
+                category = "Date/Time"
+            elif dtype in ("boolean", "bool"):
+                category = "Boolean"
+            else:
+                category = "Text"
+            type_counts[category] = type_counts.get(category, 0) + 1
+
+        if not type_counts or len(type_counts) < 1:
+            return None
+
+        chart_data = [
+            {"label": k, "value": v}
+            for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+
+        widget = {
+            "id": "chart_column_types",
+            "type": "donut_chart",
+            "title": "Column Type Distribution",
+            "chart_config": {
+                "colors": ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6"],
+                "innerRadius": "60%",
+            },
+            "data": chart_data,
+        }
+
+        return {
+            "id": f"section_donut_{uuid.uuid4().hex[:8]}",
+            "title": "🍩 Column Types",
+            "type": "chart",
+            "widgets": [widget],
+            "layout": {"gridSpan": 4},
+        }
+
+    # ─────────────────────────────────────────────────────────
+    # NEW: Data Summary Table Section
+    # ─────────────────────────────────────────────────────────
+
+    def _create_data_summary_table_section(self, profiles: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create summary table of all numeric columns with stats."""
+
+        rows = []
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            mean_v = col_prof.get("mean")
+            if mean_v is None or not isinstance(mean_v, (int, float)):
+                continue
+            rows.append({
+                "column": str(col_name).replace("_", " ").title(),
+                "mean": round(float(col_prof.get("mean", 0)), 2),
+                "min": round(float(col_prof.get("min", 0)), 2),
+                "max": round(float(col_prof.get("max", 0)), 2),
+                "std": round(float(col_prof.get("std", 0)), 2),
+                "missing": int(col_prof.get("null_count", 0)),
+                "missing_pct": round(float(col_prof.get("null_percentage", 0)), 1),
+            })
+
+        if not rows:
+            return None
+
+        # Sort by mean descending
+        rows.sort(key=lambda r: abs(r["mean"]), reverse=True)
+
+        widget = {
+            "id": "data_summary_table",
+            "type": "table",
+            "title": "Numeric Column Summary",
+            "columns": [
+                {"key": "column", "label": "Column", "width": 220},
+                {"key": "mean", "label": "Average", "width": 100},
+                {"key": "min", "label": "Min", "width": 80},
+                {"key": "max", "label": "Max", "width": 80},
+                {"key": "std", "label": "Std Dev", "width": 90},
+                {"key": "missing", "label": "Missing", "width": 80},
+                {"key": "missing_pct", "label": "Missing %", "width": 80},
+            ],
+            "data": rows,
+            "pagination": {"pageSize": 20},
+        }
+
+        return {
+            "id": f"section_summary_{uuid.uuid4().hex[:8]}",
+            "title": "📋 Data Summary",
+            "type": "table",
+            "widgets": [widget],
+            "layout": {"fullWidth": True},
+        }
+
+    # ─────────────────────────────────────────────────────────
+    # Existing sections (kept)
+    # ─────────────────────────────────────────────────────────
+
     def _create_metrics_section(self, insights: List[Dict]) -> Dict[str, Any]:
         """Create critical metrics section"""
         

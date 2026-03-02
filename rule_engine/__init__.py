@@ -42,6 +42,12 @@ from rule_engine.energy_rules import (
     PeakDemandRule,
 )
 
+from rule_engine.generic_data_rules import (
+    DataSummaryRule,
+    HighValueRule,
+    MissingDataPatternRule,
+)
+
 __all__ = [
     "RuleBase",
     "RuleResult",
@@ -64,4 +70,7 @@ __all__ = [
     "HighConsumptionDayRule",
     "ConsumptionTrendRule",
     "PeakDemandRule",
+    "DataSummaryRule",
+    "HighValueRule",
+    "MissingDataPatternRule",
 ]

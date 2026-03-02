@@ -70,6 +70,10 @@ type DashboardWidget = {
   unit?: string;
   trend?: "up" | "down" | "flat";
   trendValue?: string;
+  color?: string;
+  icon?: string;
+  chart_config?: Record<string, any>;
+  columns?: Array<{ key: string; label: string; width?: number }>;
 };
 
 type DashboardSection = {
@@ -537,26 +541,104 @@ interface WidgetContentProps {
 }
 
 const WidgetContent = ({ widget, visualType, filteredData }: WidgetContentProps) => {
+  // KPI card: large number with colored accent
+  if (widget.type === "kpi") {
+    return <KpiCard widget={widget} />;
+  }
+
   if (visualType === "metric") {
     return <MetricCard widget={widget} />;
+  }
+
+  // donut_chart: Pie chart with inner radius for donut look
+  if (widget.type === "donut_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
+    const donutColors = widget.chart_config?.colors || CHART_COLORS;
+    const chartData = widget.data.map((d: any) => ({
+      name: String(d.label || d.name || ""),
+      value: Number(d.value || 0),
+    }));
+    return (
+      <div style={{ width: "100%", height: 260 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={chartData}
+              dataKey="value"
+              nameKey="name"
+              cx="50%" cy="50%"
+              innerRadius="55%"
+              outerRadius="80%"
+              strokeWidth={2}
+              stroke="#fff"
+              label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
+              labelLine={false}
+            >
+              {chartData.map((_: any, i: number) => (
+                <Cell key={i} fill={donutColors[i % donutColors.length]} />
+              ))}
+            </Pie>
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Legend wrapperStyle={{ fontSize: 11, color: "#6b7280" }} iconType="circle" iconSize={8} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // bar_chart: horizontal bar chart from data array
+  if (widget.type === "bar_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
+    const chartData = widget.data.map((d: any) => ({
+      label: String(d.label || d.x || ""),
+      value: Number(d.value || d.y || 0),
+    }));
+    return (
+      <div style={{ width: "100%", height: Math.max(280, chartData.length * 34) }}>
+        <ResponsiveContainer>
+          <BarChart data={chartData} layout="vertical" barCategoryGap="16%">
+            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+            <XAxis type="number" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+            <YAxis
+              dataKey="label" type="category" width={140} tick={AXIS_STYLE}
+              axisLine={false} tickLine={false}
+            />
+            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "rgba(99,102,241,0.06)" }} />
+            <Bar dataKey="value" radius={[0, 5, 5, 0]}>
+              {chartData.map((_: any, i: number) => (
+                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
   }
 
   if (visualType === "table") {
     const rows = Array.isArray(filteredData) ? filteredData : [];
     if (!rows.length) return <EmptyViz />;
-    const cols = Object.keys(rows[0]).slice(0, 7);
+    // Use explicit columns from widget if available, otherwise auto-detect
+    const explicitCols = widget.columns;
+    const cols = explicitCols
+      ? explicitCols.map((c: any) => c.key)
+      : Object.keys(rows[0]).slice(0, 7);
+    const labels: Record<string, string> = {};
+    if (explicitCols) {
+      for (const c of explicitCols) labels[c.key] = c.label || c.key;
+    }
     return (
-      <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
+      <div style={{ overflowX: "auto", maxHeight: 420, overflowY: "auto" }}>
         <table style={s.table}>
           <thead>
             <tr>
-              {cols.map((c) => <th key={c} style={s.th}>{c.replace(/_/g, " ")}</th>)}
+              {cols.map((c: string) => (
+                <th key={c} style={s.th}>{labels[c] || c.replace(/_/g, " ")}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.slice(0, 50).map((row: any, i: number) => (
               <tr key={i} style={i % 2 === 1 ? { background: "#f9fafb" } : {}}>
-                {cols.map((c) => (
+                {cols.map((c: string) => (
                   <td key={c} style={s.td}>{formatCell(row[c])}</td>
                 ))}
               </tr>
@@ -675,6 +757,62 @@ const MetricCard = ({ widget }: { widget: DashboardWidget }) => {
               <strong style={{ fontSize: 14, color: "#111827" }}>{String(v)}</strong>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── KPI Card (new — rendered by kpi_row sections) ─────────────────────────────
+
+const KpiCard = ({ widget }: { widget: DashboardWidget }) => {
+  const accentColor = widget.color || "#6366f1";
+  const valueStr = widget.value !== undefined ? String(widget.value) : "—";
+  const displayValue =
+    typeof widget.value === "number" && widget.value >= 1000
+      ? widget.value.toLocaleString()
+      : valueStr;
+
+  return (
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-between",
+      height: "100%",
+      position: "relative",
+      overflow: "hidden",
+      padding: "18px 16px 14px",
+      background: `linear-gradient(135deg, ${accentColor}08 0%, ${accentColor}03 100%)`,
+      borderTop: `3px solid ${accentColor}`,
+      borderRadius: "0 0 12px 12px",
+    }}>
+      <div style={{
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: "uppercase" as const,
+        letterSpacing: "0.8px",
+        color: "#9ca3af",
+        marginBottom: 8,
+      }}>
+        {widget.title || ""}
+      </div>
+      <div style={{
+        fontSize: 28,
+        fontWeight: 800,
+        color: "#111827",
+        lineHeight: 1.1,
+        letterSpacing: "-0.03em",
+      }}>
+        {displayValue}
+      </div>
+      {widget.subtitle && (
+        <div style={{
+          fontSize: 11,
+          color: accentColor,
+          marginTop: 6,
+          fontWeight: 600,
+        }}>
+          {widget.subtitle}
         </div>
       )}
     </div>
@@ -852,6 +990,9 @@ function applySlicers(data: any, slicers: UserLayout["slicers"]): any {
 }
 
 function autoVisualType(widget: DashboardWidget): VisualType {
+  if (widget.type === "kpi") return "metric";
+  if (widget.type === "bar_chart") return "bar";
+  if (widget.type === "donut_chart") return "pie";
   if (widget.type === "table") return "table";
   if (widget.type === "metric" || widget.type === "card") return "metric";
   if (Array.isArray(widget.data) && widget.data.length > 0) return "line";
@@ -859,6 +1000,7 @@ function autoVisualType(widget: DashboardWidget): VisualType {
 }
 
 function allowedVisuals(widget: DashboardWidget): VisualType[] {
+  if (widget.type === "kpi" || widget.type === "bar_chart" || widget.type === "donut_chart") return ["metric"];
   if (Array.isArray(widget.data) && widget.data.length > 0) {
     return ["line", "area", "bar", "pie", "table", "metric"];
   }
@@ -866,11 +1008,15 @@ function allowedVisuals(widget: DashboardWidget): VisualType[] {
 }
 
 function canSwitchVisual(widget: DashboardWidget): boolean {
+  if (widget.type === "kpi" || widget.type === "bar_chart" || widget.type === "donut_chart") return false;
   return Array.isArray(widget.data) && widget.data.length > 0;
 }
 
 function widgetGridSpan(widget: DashboardWidget): number {
   if (widget.type === "table") return 12;
+  if (widget.type === "bar_chart") return 8;   // Takes 8 cols, donut takes 4 → side by side
+  if (widget.type === "donut_chart") return 4;  // Companion to bar chart
+  if (widget.type === "kpi") return 2;
   if (widget.type === "metric" || widget.type === "card") return 3;
   if (Array.isArray(widget.data)) return 6;
   return 3;
@@ -1031,8 +1177,8 @@ const s: Record<string, React.CSSProperties> = {
   card: {
     background: "#fff", borderRadius: 12,
     border: "1px solid #e5e7eb",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-    overflow: "hidden", transition: "box-shadow 0.15s ease",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.02)",
+    overflow: "hidden", transition: "box-shadow 0.15s ease, transform 0.15s ease",
   },
   cardMetric: {
     background: "#ffffff",
@@ -1142,6 +1288,16 @@ const ExportDashboardButton = ({ runId }: { runId: string }) => {
     setExportMsg(null);
 
     try {
+      // Prompt user for save directory first
+      const dirRes = await frontendApi.selectDirectory();
+      if (!dirRes.success || !dirRes.data) {
+        setExportMsg("Export cancelled.");
+        setTimeout(() => setExportMsg(null), 2000);
+        setExporting(false);
+        return;
+      }
+      const outputDir = String(dirRes.data);
+
       // Wait for charts to fully render
       await new Promise((r) => setTimeout(r, 2000));
 
@@ -1163,15 +1319,13 @@ const ExportDashboardButton = ({ runId }: { runId: string }) => {
         useCORS: true,
         backgroundColor: "#f3f4f6",
         logging: false,
-        // Wait for images to load
         allowTaint: true,
       });
 
       const imageBase64 = canvas.toDataURL("image/png");
-      // Strip the data:image/png;base64, prefix
       const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
-      const res = await frontendApi.exportDashboardPdf(runId, base64Data);
+      const res = await frontendApi.exportDashboardPdf(runId, base64Data, outputDir);
 
       if (res.success) {
         setExportMsg("Dashboard exported successfully!");

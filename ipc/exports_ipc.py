@@ -82,7 +82,7 @@ def _load_insights_and_profiling(run_id: str):
 # 1. exportInsightsDocx(runId)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def export_insights_docx_ipc(run_id: str) -> Dict[str, Any]:
+def export_insights_docx_ipc(run_id: str, output_dir: str = "") -> Dict[str, Any]:
     """MODE 1 — Generate insights DOCX report."""
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
@@ -96,7 +96,7 @@ def export_insights_docx_ipc(run_id: str) -> Dict[str, Any]:
         if not insights:
             return {"success": False, "message": "No insights available for this run"}
 
-        output_dir = str(_get_run_export_dir(run_id))
+        output_dir = output_dir if output_dir else str(_get_run_export_dir(run_id))
         exporter = DocxExporter()
         file_path = exporter.export_insights_docx(
             run_id=run_id,
@@ -129,7 +129,7 @@ def export_insights_docx_ipc(run_id: str) -> Dict[str, Any]:
 # 2. exportInsightsPdf(runId)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def export_insights_pdf_ipc(run_id: str) -> Dict[str, Any]:
+def export_insights_pdf_ipc(run_id: str, output_dir: str = "") -> Dict[str, Any]:
     """MODE 1 — Generate insights PDF report (A4 portrait)."""
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
@@ -143,7 +143,7 @@ def export_insights_pdf_ipc(run_id: str) -> Dict[str, Any]:
         if not insights:
             return {"success": False, "message": "No insights available for this run"}
 
-        output_dir = str(_get_run_export_dir(run_id))
+        output_dir = output_dir if output_dir else str(_get_run_export_dir(run_id))
         exporter = PDFExporter()
         file_path = exporter.export_insights_pdf(
             run_id=run_id,
@@ -176,7 +176,7 @@ def export_insights_pdf_ipc(run_id: str) -> Dict[str, Any]:
 # 3. exportDashboardPdf(runId, imageDataBase64)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def export_dashboard_pdf_ipc(run_id: str, image_data_base64: str) -> Dict[str, Any]:
+def export_dashboard_pdf_ipc(run_id: str, image_data_base64: str, output_dir: str = "") -> Dict[str, Any]:
     """MODE 2 — Generate dashboard screenshot PDF (A3 landscape)."""
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
@@ -190,7 +190,7 @@ def export_dashboard_pdf_ipc(run_id: str, image_data_base64: str) -> Dict[str, A
         if "," in image_data_base64:
             image_data_base64 = image_data_base64.split(",", 1)[1]
 
-        output_dir = str(_get_run_export_dir(run_id))
+        output_dir = output_dir if output_dir else str(_get_run_export_dir(run_id))
         exporter = PDFExporter()
         file_path = exporter.export_dashboard_pdf(
             run_id=run_id,
@@ -216,7 +216,7 @@ def export_dashboard_pdf_ipc(run_id: str, image_data_base64: str) -> Dict[str, A
 # 4. exportDashboardJson(runId)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def export_dashboard_json_ipc(run_id: str) -> Dict[str, Any]:
+def export_dashboard_json_ipc(run_id: str, output_dir: str = "") -> Dict[str, Any]:
     """MODE 3 — Export dashboard blueprint + user layout as JSON."""
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
@@ -228,9 +228,10 @@ def export_dashboard_json_ipc(run_id: str) -> Dict[str, Any]:
         if not blueprint and not user_layout:
             return {"success": False, "message": "No dashboard data available for this run"}
 
-        output_dir = _get_run_export_dir(run_id)
+        resolved_dir = Path(output_dir) if output_dir else _get_run_export_dir(run_id)
+        resolved_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(output_dir / f"dashboard_layout_{run_id}_{timestamp}.json")
+        filename = str(resolved_dir / f"dashboard_layout_{run_id}_{timestamp}.json")
 
         payload = {
             "format_version": "1.0",
@@ -262,7 +263,7 @@ def export_dashboard_json_ipc(run_id: str) -> Dict[str, Any]:
 # 5. exportFullReport(runId, imageDataBase64)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def export_full_report_ipc(run_id: str, image_data_base64: str) -> Dict[str, Any]:
+def export_full_report_ipc(run_id: str, image_data_base64: str, output_dir: str = "") -> Dict[str, Any]:
     """MODE 4 — Generate full report PDF (insights A4 + dashboard A3)."""
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
@@ -282,7 +283,7 @@ def export_full_report_ipc(run_id: str, image_data_base64: str) -> Dict[str, Any
         if not insights:
             return {"success": False, "message": "No insights available for this run"}
 
-        output_dir = str(_get_run_export_dir(run_id))
+        output_dir = output_dir if output_dir else str(_get_run_export_dir(run_id))
         exporter = PDFExporter()
         file_path = exporter.export_full_report_pdf(
             run_id=run_id,

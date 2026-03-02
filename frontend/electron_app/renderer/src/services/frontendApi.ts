@@ -300,12 +300,14 @@ export const frontendApi = {
   },
 
   async exportInsightsDocx(
-    runId: string
+    runId: string,
+    outputDir = ""
   ): Promise<IPCResponse<{ file_path: string }>> {
     try {
       return await invokeBridge<IPCResponse<{ file_path: string }>>(
         "export_insights_docx",
-        runId
+        runId,
+        outputDir
       );
     } catch (error) {
       return {
@@ -316,12 +318,14 @@ export const frontendApi = {
   },
 
   async exportInsightsPdf(
-    runId: string
+    runId: string,
+    outputDir = ""
   ): Promise<IPCResponse<{ file_path: string }>> {
     try {
       return await invokeBridge<IPCResponse<{ file_path: string }>>(
         "export_insights_pdf",
-        runId
+        runId,
+        outputDir
       );
     } catch (error) {
       return {
@@ -333,13 +337,15 @@ export const frontendApi = {
 
   async exportDashboardPdf(
     runId: string,
-    imageDataBase64: string
+    imageDataBase64: string,
+    outputDir = ""
   ): Promise<IPCResponse<{ file_path: string }>> {
     try {
       return await invokeBridge<IPCResponse<{ file_path: string }>>(
         "export_dashboard_pdf",
         runId,
-        imageDataBase64
+        imageDataBase64,
+        outputDir
       );
     } catch (error) {
       return {
@@ -350,12 +356,14 @@ export const frontendApi = {
   },
 
   async exportDashboardJson(
-    runId: string
+    runId: string,
+    outputDir = ""
   ): Promise<IPCResponse<{ file_path: string }>> {
     try {
       return await invokeBridge<IPCResponse<{ file_path: string }>>(
         "export_dashboard_json",
-        runId
+        runId,
+        outputDir
       );
     } catch (error) {
       return {
@@ -367,13 +375,15 @@ export const frontendApi = {
 
   async exportFullReport(
     runId: string,
-    imageDataBase64: string
+    imageDataBase64: string,
+    outputDir = ""
   ): Promise<IPCResponse<{ file_path: string }>> {
     try {
       return await invokeBridge<IPCResponse<{ file_path: string }>>(
         "export_full_report",
         runId,
-        imageDataBase64
+        imageDataBase64,
+        outputDir
       );
     } catch (error) {
       return {

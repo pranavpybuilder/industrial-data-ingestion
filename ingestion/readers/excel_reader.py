@@ -22,6 +22,9 @@ class ExcelReader:
     - fallback engine attempts
     - auto sheet detection
     - dynamic header row scan
+    - merged-cell header expansion (industrial Excel support)
+    - multi-row header combination
+    - automatic unnamed/empty column cleanup
     - loud and actionable failures
     """
 
@@ -51,6 +54,28 @@ class ExcelReader:
                     requested_sheet=sheet_name,
                     requested_header=header,
                 )
+
+                # ----------------------------------------------------------
+                # Try openpyxl-based merged-cell-aware read first (.xlsx)
+                # This handles industrial Excel files with merged headers.
+                # ----------------------------------------------------------
+                if suffix in {".xlsx", ".xlsm", ".xltx"}:
+                    try:
+                        df = ExcelReader._read_with_merged_cell_handling(
+                            path, selection
+                        )
+                        if df is not None and not df.empty:
+                            if detect_dates and selection.header_row is not None:
+                                ExcelReader._validate_temporal_columns(
+                                    df, selection.sheet_name
+                                )
+                            return df
+                    except Exception:
+                        pass  # Fall through to standard pandas read
+
+                # ----------------------------------------------------------
+                # Standard pandas read (fallback)
+                # ----------------------------------------------------------
                 df = pd.read_excel(
                     str(path),
                     sheet_name=selection.sheet_name,
@@ -65,6 +90,9 @@ class ExcelReader:
 
                 if selection.header_row is not None:
                     df.columns = ExcelReader._normalize_columns(df.columns)
+
+                # Clean up unnamed/empty columns
+                df = ExcelReader._drop_junk_columns(df)
 
                 if detect_dates and selection.header_row is not None:
                     ExcelReader._validate_temporal_columns(df, selection.sheet_name)
@@ -89,6 +117,214 @@ class ExcelReader:
             f"Failed to read Excel file '{path}'. "
             "Tried openpyxl and pandas auto-engine fallback."
         ) from last_error
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Merged-cell-aware reader (handles industrial Excel formats)
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_with_merged_cell_handling(
+        path: Path, selection: SheetSelection
+    ) -> Optional[pd.DataFrame]:
+        """
+        Read an Excel file using openpyxl directly to handle merged cells.
+
+        Industrial Excel files often have:
+        - Merged cells in header rows (group headers spanning columns)
+        - Multi-row headers (row 1 = groups, row 2 = sub-columns)
+        - Lots of None values in header rows due to merges
+
+        This method:
+        1. Opens with openpyxl and reads merged cell ranges
+        2. Unmerges and forward-fills header values
+        3. Detects and combines multi-row headers
+        4. Reads data rows into a DataFrame
+        5. Drops junk columns (>95% empty + unnamed)
+        """
+        import openpyxl
+
+        wb = openpyxl.load_workbook(str(path), read_only=False, data_only=True)
+
+        # Resolve sheet
+        sheet_key = selection.sheet_name
+        if isinstance(sheet_key, int):
+            if sheet_key >= len(wb.sheetnames):
+                return None
+            ws = wb[wb.sheetnames[sheet_key]]
+        else:
+            if sheet_key not in wb.sheetnames:
+                return None
+            ws = wb[sheet_key]
+
+        if ws.max_row is None or ws.max_row < 2:
+            return None
+
+        # --- Step 1: Build a merged-cell map ---
+        merged_map = {}  # (row, col) -> value from top-left of merge
+        for merge_range in list(ws.merged_cells.ranges):
+            top_left_value = ws.cell(merge_range.min_row, merge_range.min_col).value
+            for row in range(merge_range.min_row, merge_range.max_row + 1):
+                for col in range(merge_range.min_col, merge_range.max_col + 1):
+                    merged_map[(row, col)] = top_left_value
+
+        def cell_value(row: int, col: int):
+            """Get cell value, resolving merged cells."""
+            if (row, col) in merged_map:
+                return merged_map[(row, col)]
+            return ws.cell(row, col).value
+
+        # --- Step 2: Detect header row(s) ---
+        header_row_idx = (selection.header_row or 0) + 1  # 1-indexed for openpyxl
+        max_col = ws.max_column or 1
+
+        # Read candidate header rows (up to 3)
+        header_rows_data = []
+        for r in range(header_row_idx, min(header_row_idx + 3, (ws.max_row or 1) + 1)):
+            row_vals = [cell_value(r, c) for c in range(1, max_col + 1)]
+            header_rows_data.append(row_vals)
+
+        if not header_rows_data:
+            return None
+
+        # --- Step 3: Determine best header strategy ---
+        # Count how many cells in each candidate row are non-null text
+        row_text_counts = []
+        for row_vals in header_rows_data:
+            text_count = sum(
+                1 for v in row_vals
+                if v is not None and isinstance(v, str) and v.strip()
+            )
+            row_text_counts.append(text_count)
+
+        # If row 1 has few text headers but row 2 or 3 has many more,
+        # the later row is likely the real header
+        best_header_offset = 0
+        if len(row_text_counts) > 1:
+            max_count = max(row_text_counts)
+            for i, count in enumerate(row_text_counts):
+                if count == max_count:
+                    best_header_offset = i
+                    break
+
+        # Use the best header row
+        final_header = list(header_rows_data[best_header_offset])
+        data_start_row = header_row_idx + best_header_offset + 1  # 1-indexed
+
+        # --- Step 4: Forward-fill None gaps in the header ---
+        # In industrial files, merged headers leave gaps
+        last_val = None
+        for i, val in enumerate(final_header):
+            if val is not None and str(val).strip():
+                last_val = val
+            elif last_val is not None:
+                # Only forward-fill if the *data* below this column is non-empty
+                # to avoid filling decorative merges
+                pass  # We'll name these below
+
+        # --- Step 5: Build column names ---
+        col_names = []
+        seen_names = {}
+        for i, val in enumerate(final_header):
+            if val is None or not str(val).strip():
+                # Check if there's a formula string we should skip
+                name = f"unnamed_{i}"
+            else:
+                name = str(val).strip()
+                # Clean formula references like "='Production data'!Q1"
+                if name.startswith("="):
+                    name = f"formula_ref_{i}"
+
+            # Normalize
+            name = (
+                name.lower()
+                .replace(" ", "_")
+                .replace("/", "_")
+                .replace("'", "")
+                .replace('"', "")
+            )
+            # Remove non-alphanumeric (keep underscore)
+            import re
+            name = re.sub(r"[^a-z0-9_]", "", name)
+            if not name:
+                name = f"col_{i}"
+
+            # Deduplicate
+            if name in seen_names:
+                seen_names[name] += 1
+                name = f"{name}_{seen_names[name]}"
+            else:
+                seen_names[name] = 0
+
+            col_names.append(name)
+
+        # --- Step 6: Read data rows ---
+        data_rows = []
+        max_data_row = min(ws.max_row or 1, data_start_row + 50000)  # Safety cap
+        for r in range(data_start_row, max_data_row + 1):
+            row_data = [cell_value(r, c) for c in range(1, max_col + 1)]
+            # Skip completely empty rows
+            if any(v is not None for v in row_data):
+                data_rows.append(row_data)
+
+        if not data_rows:
+            return None
+
+        df = pd.DataFrame(data_rows, columns=col_names[:max_col])
+
+        # --- Step 7: Drop junk columns ---
+        df = ExcelReader._drop_junk_columns(df)
+
+        # Drop fully empty rows
+        df = df.dropna(how="all").reset_index(drop=True)
+
+        if df.empty:
+            return None
+
+        return df
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Junk column cleanup
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _drop_junk_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Drop columns that are:
+        - Named 'unnamed_*' or 'formula_ref_*' AND
+        - Have >90% null/empty values
+
+        This removes padding columns from merged-cell layouts and
+        formula reference columns without preserving decorative junk.
+        """
+        if df.empty:
+            return df
+
+        cols_to_drop = []
+        total_rows = len(df)
+        if total_rows == 0:
+            return df
+
+        for col in df.columns:
+            col_str = str(col).lower()
+            is_unnamed = (
+                col_str.startswith("unnamed")
+                or col_str.startswith("formula_ref")
+                or col_str.startswith("col_")
+            )
+            if is_unnamed:
+                null_count = df[col].isna().sum()
+                null_ratio = null_count / total_rows
+                if null_ratio > 0.90:
+                    cols_to_drop.append(col)
+
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
+
+        return df
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Selection & header detection (original logic, improved)
+    # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _resolve_selection(
@@ -187,6 +423,9 @@ class ExcelReader:
         if len(non_null) == 1:
             return -0.3
 
+        total_cells = len(row)
+        fill_ratio = len(non_null) / float(max(total_cells, 1))
+
         text = non_null.astype(str).str.strip()
         unique_ratio = text.nunique() / float(max(len(text), 1))
         alpha_ratio = float(text.str.contains(r"[A-Za-z]", regex=True).mean())
@@ -194,8 +433,9 @@ class ExcelReader:
         punctuation_penalty = float(text.str.fullmatch(r"[-_=]+", na=False).mean())
 
         return (
-            unique_ratio * 0.45
-            + alpha_ratio * 0.4
+            unique_ratio * 0.35
+            + alpha_ratio * 0.30
+            + fill_ratio * 0.20
             + (1.0 - numeric_ratio) * 0.15
             - punctuation_penalty * 0.2
         )

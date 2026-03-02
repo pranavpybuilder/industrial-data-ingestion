@@ -43,6 +43,11 @@ from rule_engine.maintenance_rules import (
     TemperatureUptrendRule,
     VibrationSpikeRule,
 )
+from rule_engine.generic_data_rules import (
+    DataSummaryRule,
+    HighValueRule,
+    MissingDataPatternRule,
+)
 from rule_engine.threshold_engine import ThresholdEngine
 from storage.connection import close_connection, initialize_database
 from storage.repositories.dashboard_repo import DashboardRepository
@@ -956,6 +961,22 @@ class PipelineRunner:
 
         if "vibration" in profiles:
             result = VibrationSpikeRule().evaluate(context)
+            rule_findings.append(
+                {
+                    "rule_name": result.rule_name,
+                    "rule_id": result.rule_id,
+                    "triggered": result.triggered,
+                    "severity": str(result.severity).upper(),
+                    "confidence": float(result.confidence),
+                    "message": result.message,
+                    "remediation": result.remediation,
+                    "affected_columns": result.affected_columns,
+                }
+            )
+
+        # ── Generic data-centric rules (always run) ──
+        for generic_rule in (DataSummaryRule(), HighValueRule(), MissingDataPatternRule()):
+            result = generic_rule.evaluate(context)
             rule_findings.append(
                 {
                     "rule_name": result.rule_name,

@@ -1,6 +1,7 @@
 # storage/connection.py
 
 import atexit
+import sys
 import time
 import logging
 from pathlib import Path
@@ -210,18 +211,38 @@ def close_connection() -> None:
                 _connection = None
 
 
+def _get_schema_path() -> Path:
+    """Find schema.sql in both dev and PyInstaller frozen environments."""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller frozen — files are extracted to sys._MEIPASS
+        base = Path(sys._MEIPASS)
+    else:
+        # Development — schema.sql is next to connection.py
+        base = Path(__file__).parent
+
+    schema_path = base / "storage" / "schema.sql"
+    if not schema_path.exists():
+        # Also try directly in base (in case bundled at root of _MEIPASS)
+        schema_path = base / "schema.sql"
+    if not schema_path.exists():
+        raise FileNotFoundError(
+            f"schema.sql not found. Searched:\n"
+            f"  {base / 'storage' / 'schema.sql'}\n"
+            f"  {base / 'schema.sql'}\n"
+            f"This is a packaging error — schema.sql must be included in the build."
+        )
+    return schema_path
+
+
 def initialize_database() -> None:
     """
     Initializes database schema if not already present.
     Safe to call multiple times.
     """
     conn = get_connection()
-    schema_file = Path(__file__).parent / "schema.sql"
+    schema_path = _get_schema_path()
 
-    if not schema_file.exists():
-        raise FileNotFoundError("schema.sql not found in storage directory")
-
-    with open(schema_file, "r", encoding="utf-8") as f:
+    with open(schema_path, "r", encoding="utf-8") as f:
         conn.execute(f.read())
 
     _run_migrations(conn)

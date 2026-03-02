@@ -184,14 +184,28 @@ const Exports = () => {
     setErrorMsg(null);
     setSuccessFilePath(null);
 
+    // --- Prompt user for save directory ---
+    let outputDir = "";
+    try {
+      const dirRes = await frontendApi.selectDirectory();
+      if (!dirRes.success || !dirRes.data?.directory_path) {
+        // User cancelled the folder picker
+        setLoadingCard(null);
+        return;
+      }
+      outputDir = dirRes.data.directory_path;
+    } catch {
+      setLoadingCard(null);
+      setErrorMsg("Failed to open folder picker. Export cancelled.");
+      return;
+    }
+
     let imageBase64: string | null = null;
 
     // Capture dashboard image if needed
     if (card.needsCapture) {
       imageBase64 = await captureDashboardImage();
       if (!imageBase64) {
-        // Dashboard is not visible (user is on the Exports page).
-        // Guide them to use the export button on the Dashboard page instead.
         setLoadingCard(null);
         setErrorMsg(
           "The dashboard is not currently visible. To capture a dashboard snapshot, " +
@@ -207,19 +221,19 @@ const Exports = () => {
     try {
       switch (card.id) {
         case "insights_docx":
-          res = await frontendApi.exportInsightsDocx(activeRun);
+          res = await frontendApi.exportInsightsDocx(activeRun, outputDir);
           break;
         case "insights_pdf":
-          res = await frontendApi.exportInsightsPdf(activeRun);
+          res = await frontendApi.exportInsightsPdf(activeRun, outputDir);
           break;
         case "dashboard_pdf":
-          res = await frontendApi.exportDashboardPdf(activeRun, imageBase64!);
+          res = await frontendApi.exportDashboardPdf(activeRun, imageBase64!, outputDir);
           break;
         case "dashboard_json":
-          res = await frontendApi.exportDashboardJson(activeRun);
+          res = await frontendApi.exportDashboardJson(activeRun, outputDir);
           break;
         case "full_report":
-          res = await frontendApi.exportFullReport(activeRun, imageBase64!);
+          res = await frontendApi.exportFullReport(activeRun, imageBase64!, outputDir);
           break;
         default:
           res = { success: false, message: "Unknown export mode" };
@@ -417,14 +431,20 @@ const Exports = () => {
                         {row.file_path}
                       </td>
                       <td style={s.td}>
-                        <button
-                          style={s.openBtn}
-                          onClick={() => handleOpenFile(row.file_path)}
-                          title="Open file"
-                        >
-                          <FiExternalLink size={13} />
-                          Open
-                        </button>
+                        {row.file_exists === false ? (
+                          <span style={{ fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>
+                            File no longer available
+                          </span>
+                        ) : (
+                          <button
+                            style={s.openBtn}
+                            onClick={() => handleOpenFile(row.file_path)}
+                            title="Open file"
+                          >
+                            <FiExternalLink size={13} />
+                            Open
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
