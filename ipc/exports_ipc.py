@@ -67,11 +67,47 @@ def _load_insights_and_profiling(run_id: str):
         return None, None, "Run not found"
 
     insights = insight_repo.get_insights(run_id)
-    # Profiling is optional — don't fail if missing
+
+    # Profiling is optional — don't fail if missing.
+    # The DB stores profiling as a flat list of column records;
+    # exporters expect {columns: {col_name: {...}}, quality_metrics: {...}}.
+    profiling = None
     try:
         from storage.repositories.profiling_repo import ProfilingRepository
         profiling_repo = ProfilingRepository()
-        profiling = profiling_repo.get_profiling(run_id)
+        raw_rows = profiling_repo.get_profiling_results(run_id)
+        if raw_rows:
+            columns: dict = {}
+            total_missing = 0
+            issues: list = []
+            for row in raw_rows:
+                col_name = row.get("column_name", "unknown")
+                miss_pct = float(row.get("missing_percentage", 0))
+                columns[col_name] = {
+                    "type": row.get("detected_type", "unknown"),
+                    "non_null_percentage": max(0.0, 100.0 - miss_pct),
+                    "missing_percentage": miss_pct,
+                    "missing_count": 0,
+                    "unique_values": 0,
+                    "distinct_count": 0,
+                    "outlier_count": int(row.get("outlier_count", 0)),
+                }
+                if miss_pct > 5:
+                    issues.append({
+                        "column": col_name,
+                        "issue_type": f"{miss_pct:.1f}% missing",
+                        "severity": "warning" if miss_pct < 30 else "critical",
+                        "details": f"{col_name} has {miss_pct:.1f}% missing values",
+                    })
+                total_missing += int(row.get("outlier_count", 0))
+            profiling = {
+                "columns": columns,
+                "quality_metrics": {
+                    "health_score": 0.0,
+                    "total_missing": total_missing,
+                    "issues": issues,
+                },
+            }
     except Exception:
         profiling = None
 
@@ -177,26 +213,42 @@ def export_insights_pdf_ipc(run_id: str, output_dir: str = "") -> Dict[str, Any]
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def export_dashboard_pdf_ipc(run_id: str, image_data_base64: str, output_dir: str = "") -> Dict[str, Any]:
-    """MODE 2 — Generate dashboard screenshot PDF (A3 landscape)."""
+    """MODE 2 — Generate dashboard PDF.
+    If image_data_base64 is provided, embeds the screenshot (A3 landscape).
+    If empty, generates a data-centric PDF from the stored blueprint.
+    """
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
-    if not image_data_base64:
-        return {"success": False, "message": "Dashboard image data is required"}
 
     try:
         from export.pdf_exporter import PDFExporter
 
-        # Strip data URI prefix if present
-        if "," in image_data_base64:
-            image_data_base64 = image_data_base64.split(",", 1)[1]
-
         output_dir = output_dir if output_dir else str(_get_run_export_dir(run_id))
         exporter = PDFExporter()
-        file_path = exporter.export_dashboard_pdf(
-            run_id=run_id,
-            image_data_base64=image_data_base64,
-            output_dir=output_dir,
-        )
+
+        if image_data_base64:
+            # Strip data URI prefix if present
+            if "," in image_data_base64:
+                image_data_base64 = image_data_base64.split(",", 1)[1]
+
+            file_path = exporter.export_dashboard_pdf(
+                run_id=run_id,
+                image_data_base64=image_data_base64,
+                output_dir=output_dir,
+            )
+        else:
+            # Server-side fallback: generate PDF from blueprint data
+            from storage.repositories.dashboard_repo import DashboardRepository
+            dashboard_repo = DashboardRepository()
+            dashboard = dashboard_repo.get_dashboard_for_run(run_id)
+            if not dashboard:
+                return {"success": False, "message": "No dashboard found for this run. Process the file first."}
+
+            file_path = exporter.export_dashboard_from_blueprint(
+                run_id=run_id,
+                blueprint=dashboard,
+                output_dir=output_dir,
+            )
 
         _save_export_record(run_id, "dashboard_pdf", "dashboard", file_path)
         logger.info(f"Dashboard PDF export completed: {file_path}")

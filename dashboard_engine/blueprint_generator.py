@@ -6,6 +6,7 @@ Generates complete dashboard blueprints from insights and profiles
 import logging
 from typing import Dict, List, Any, Optional
 import uuid
+import pandas as pd
 from datetime import datetime
 
 from dashboard_engine.chart_selector import ChartSelector
@@ -49,71 +50,84 @@ class BlueprintGenerator:
     def generate(self,
                  run_id: str,
                  unified_insights: List[Dict],
-                 profiling_results: Dict[str, Any]) -> DashboardBlueprint:
+                 profiling_results: Dict[str, Any],
+                 raw_data_sample: Any = None) -> DashboardBlueprint:
         """
-        Generate complete dashboard blueprint
+        Generate complete dashboard blueprint — DATA-CENTRIC layout.
+        
+        Layout priority:
+          1. KPI Overview Row (compact: rows, columns, health, insights count)
+          2. Data Explorer Table (MAIN section — the actual ingested data, ~80%)
+          3. Column Profile Summary (compact stats table)
+          4. Insights Summary (compact — only top findings, ~10%)
         
         Args:
             run_id: Run identifier
             unified_insights: List from Module 5 orchestration
             profiling_results: From Module 2 profiling
+            raw_data_sample: Optional DataFrame with ingested data
         
         Returns:
             DashboardBlueprint ready for frontend
         """
         
-        self.logger.info("Generating dashboard blueprint...")
+        self.logger.info("Generating data-centric dashboard blueprint...")
         
         blueprint = DashboardBlueprint(run_id)
         
         try:
             profiles = profiling_results if isinstance(profiling_results, dict) else {}
 
-            # ── Row 1: KPI Overview (always first) ──────────────
+            critical_insights = [
+                i for i in unified_insights 
+                if i.get("severity") == "CRITICAL"
+            ]
+            warning_insights = [
+                i for i in unified_insights
+                if i.get("severity") == "WARNING"
+            ]
+
+            # ── Row 1: KPI Overview (compact) ───────────────
             kpi_section = self._create_kpi_section(profiles, unified_insights)
             blueprint.sections.append(kpi_section)
 
-            # ── Row 2: Charts row (bar chart 8-col + donut 4-col) ──
-            chart_section = self._create_topn_chart_section(profiles)
-            if chart_section:
-                blueprint.sections.append(chart_section)
+            # ── Row 2: DATA EXPLORER TABLE (main section) ───
+            if raw_data_sample is not None:
+                explorer_section = self._create_data_explorer_section(raw_data_sample)
+                if explorer_section:
+                    blueprint.sections.append(explorer_section)
 
+            # ── Row 3: Column Profile (compact donut + summary) ─
             donut_section = self._create_donut_chart_section(profiles)
             if donut_section:
                 blueprint.sections.append(donut_section)
-
-            # ── Row 3: Data Summary Table ──────────────────────
-            summary_section = self._create_data_summary_table_section(profiles)
-            if summary_section:
-                blueprint.sections.append(summary_section)
 
             # ── Row 4: Data Quality cards (compact) ───────────
             if profiles:
                 quality_section = self._create_quality_section(profiles)
                 blueprint.sections.append(quality_section)
 
-            # ── Row 5: Critical Alerts (if any) ───────────────
-            critical_insights = [
-                i for i in unified_insights 
-                if i.get("severity") == "CRITICAL"
-            ]
-            if critical_insights:
-                metrics_section = self._create_metrics_section(critical_insights)
-                blueprint.sections.append(metrics_section)
-
-            # ── Row 6: All Insights table ─────────────────────
+            # ── Row 5: Insights Summary (compact — top alerts only) ─
             if unified_insights:
-                all_insights_section = self._create_insights_section(unified_insights)
-                blueprint.sections.append(all_insights_section)
+                summary_section = self._create_compact_insights_section(unified_insights)
+                blueprint.sections.append(summary_section)
             
             # Metadata
+            # Calculate data_health from profiles
+            _total_cells = 0
+            _total_missing = 0
+            for _cp in profiles.values():
+                if isinstance(_cp, dict):
+                    rc = int(_cp.get("total_count", _cp.get("count", 0)))
+                    _total_cells += rc
+                    _total_missing += int(_cp.get("null_count", 0))
+            _data_health = round(100.0 * (1.0 - _total_missing / max(_total_cells, 1)), 1)
+
             blueprint.metadata = {
                 "total_insights": len(unified_insights),
                 "critical_count": len(critical_insights),
-                "warnings_count": len([
-                    i for i in unified_insights 
-                    if i.get("severity") == "WARNING"
-                ]),
+                "warnings_count": len(warning_insights),
+                "data_health": _data_health,
                 "sections": len(blueprint.sections),
                 "generated_at": datetime.utcnow().isoformat(),
             }
@@ -133,42 +147,28 @@ class BlueprintGenerator:
 
     def _create_kpi_section(self, profiles: Dict[str, Any],
                             insights: List[Dict]) -> Dict[str, Any]:
-        """Create KPI overview cards with data health score."""
+        """Create KPI overview cards — data-centric metrics."""
 
         total_cols = 0
-        numeric_cols = 0
-        text_cols = 0
         total_rows_val = 0
         total_missing = 0
         total_cells = 0
-        top_col_name = "—"
-        top_col_mean = 0.0
 
         for col_name, col_prof in profiles.items():
             if not isinstance(col_prof, dict):
                 continue
             total_cols += 1
-            row_count = int(col_prof.get("count", col_prof.get("non_null_count", 0)))
+            row_count = int(col_prof.get("total_count", col_prof.get("count", col_prof.get("non_null_count", 0))))
             total_rows_val = max(total_rows_val, row_count)
             null_ct = int(col_prof.get("null_count", 0))
             total_missing += null_ct
-            total_cells += row_count + null_ct
-
-            dtype = str(col_prof.get("detected_type", "")).lower()
-            mean_v = col_prof.get("mean")
-            is_numeric = dtype in ("numeric", "float", "int", "integer", "number") or (
-                mean_v is not None and isinstance(mean_v, (int, float))
-            )
-            if is_numeric:
-                numeric_cols += 1
-                if isinstance(mean_v, (int, float)) and abs(mean_v) > abs(top_col_mean):
-                    top_col_mean = mean_v
-                    top_col_name = str(col_name).replace("_", " ").title()
-            else:
-                text_cols += 1
+            total_cells += row_count
 
         # Data health score = % non-missing cells
         health_pct = round(100.0 * (1.0 - total_missing / max(total_cells, 1)), 1)
+
+        critical_count = len([i for i in insights if i.get("severity") == "CRITICAL"])
+        warning_count = len([i for i in insights if i.get("severity") == "WARNING"])
 
         widgets = [
             {
@@ -196,12 +196,20 @@ class BlueprintGenerator:
                 "color": "#10b981" if health_pct >= 90 else "#f59e0b" if health_pct >= 70 else "#ef4444",
             },
             {
-                "id": "kpi_missing_values",
+                "id": "kpi_critical_count",
                 "type": "kpi",
-                "title": "Missing Values",
-                "value": total_missing,
+                "title": "Critical Alerts",
+                "value": critical_count,
                 "icon": "alert",
-                "color": "#ef4444" if total_missing > 0 else "#10b981",
+                "color": "#ef4444" if critical_count > 0 else "#10b981",
+            },
+            {
+                "id": "kpi_warning_count",
+                "type": "kpi",
+                "title": "Warning Alerts",
+                "value": warning_count,
+                "icon": "warning",
+                "color": "#f59e0b" if warning_count > 0 else "#10b981",
             },
             {
                 "id": "kpi_insights_count",
@@ -209,25 +217,142 @@ class BlueprintGenerator:
                 "title": "Insights Found",
                 "value": len(insights),
                 "icon": "lightbulb",
-                "color": "#f59e0b",
-            },
-            {
-                "id": "kpi_top_column",
-                "type": "kpi",
-                "title": "Top Column",
-                "value": top_col_name,
-                "subtitle": f"avg: {round(top_col_mean, 2)}",
-                "icon": "trending_up",
                 "color": "#3b82f6",
             },
         ]
 
         return {
             "id": f"section_kpi_{uuid.uuid4().hex[:8]}",
-            "title": "📊 Overview",
+            "title": "\ud83d\udcca Overview",
             "type": "kpi_row",
             "widgets": widgets,
             "layout": {"columns": len(widgets)},
+        }
+
+    # ─────────────────────────────────────────────────────────
+    # DATA EXPLORER TABLE — Main section (~80% of dashboard)
+    # ─────────────────────────────────────────────────────────
+
+    def _create_data_explorer_section(self, raw_df) -> Optional[Dict[str, Any]]:
+        """Create the main Data Explorer table showing the actual ingested data."""
+        try:
+            if raw_df is None or len(raw_df) == 0:
+                return None
+
+            # Determine columns to show (up to 12 most important)
+            all_cols = list(raw_df.columns)
+            # Filter out internal columns
+            skip_prefixes = ("_", "unnamed", "__")
+            display_cols = [
+                c for c in all_cols
+                if not any(str(c).lower().startswith(p) for p in skip_prefixes)
+            ]
+            # Limit to 12 columns for readability
+            display_cols = display_cols[:12]
+
+            if not display_cols:
+                return None
+
+            # Build column definitions
+            columns = []
+            for col in display_cols:
+                label = str(col).replace("_", " ").title()
+                width = 150
+                # Narrower for numeric/short cols, wider for text
+                if raw_df[col].dtype in ("float64", "float32", "int64", "int32"):
+                    width = 110
+                elif raw_df[col].dtype == "object":
+                    avg_len = raw_df[col].dropna().astype(str).str.len().mean()
+                    width = min(250, max(120, int(avg_len * 8))) if avg_len == avg_len else 150
+                columns.append({"key": str(col), "label": label, "width": width})
+
+            # Serialize rows (first 100 for responsiveness)
+            sample = raw_df[display_cols].head(100)
+            rows = []
+            for _, row in sample.iterrows():
+                row_dict = {}
+                for col in display_cols:
+                    val = row[col]
+                    if pd.isna(val):
+                        row_dict[str(col)] = None
+                    elif hasattr(val, "isoformat"):
+                        row_dict[str(col)] = val.isoformat()
+                    else:
+                        row_dict[str(col)] = val
+                        # Ensure JSON-safe
+                        try:
+                            if isinstance(val, float) and (val != val):
+                                row_dict[str(col)] = None
+                        except Exception:
+                            row_dict[str(col)] = str(val)
+                rows.append(row_dict)
+
+            widget = {
+                "id": "data_explorer_table",
+                "type": "table",
+                "title": f"Data Explorer \u2014 {len(raw_df)} rows, {len(all_cols)} columns",
+                "columns": columns,
+                "data": rows,
+                "pagination": {"pageSize": 50},
+                "total_rows": len(raw_df),
+                "total_columns": len(all_cols),
+            }
+
+            return {
+                "id": f"section_explorer_{uuid.uuid4().hex[:8]}",
+                "title": "\ud83d\udcdd Data Explorer",
+                "type": "table",
+                "widgets": [widget],
+                "layout": {"fullWidth": True},
+            }
+        except Exception as e:
+            self.logger.warning(f"Error creating data explorer section: {e}")
+            return None
+
+    # ─────────────────────────────────────────────────────────
+    # COMPACT INSIGHTS SUMMARY — (~10% of dashboard)
+    # ─────────────────────────────────────────────────────────
+
+    def _create_compact_insights_section(self, insights: List[Dict]) -> Dict[str, Any]:
+        """Create a compact insights table showing only the top findings."""
+
+        # Take top 10 insights by priority
+        top_insights = sorted(
+            insights,
+            key=lambda i: float(i.get("priority_score", 0.0)),
+            reverse=True,
+        )[:10]
+
+        widget = {
+            "id": "insights_compact_table",
+            "type": "table",
+            "title": f"Top Findings ({len(top_insights)} of {len(insights)})",
+            "columns": [
+                {"key": "severity", "label": "Severity", "width": 90},
+                {"key": "title", "label": "Finding", "width": 350},
+                {"key": "source", "label": "Source", "width": 80},
+                {"key": "priority_tier", "label": "Priority", "width": 90},
+                {"key": "action_type", "label": "Action", "width": 120},
+            ],
+            "data": [
+                {
+                    "severity": i.get("severity", "INFO"),
+                    "title": i.get("title", ""),
+                    "source": i.get("source", ""),
+                    "priority_tier": i.get("priority_tier", ""),
+                    "action_type": i.get("action_type", ""),
+                }
+                for i in top_insights
+            ],
+            "pagination": {"pageSize": 10},
+        }
+
+        return {
+            "id": f"section_insights_{uuid.uuid4().hex[:8]}",
+            "title": "\ud83d\udca1 Key Findings",
+            "type": "table",
+            "widgets": [widget],
+            "layout": {"fullWidth": True},
         }
 
     # ─────────────────────────────────────────────────────────

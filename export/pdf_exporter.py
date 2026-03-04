@@ -259,6 +259,149 @@ class PDFExporter:
         return filename
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # MODE 2B — Dashboard PDF from Blueprint (server-side, no screenshot)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    def export_dashboard_from_blueprint(
+        self,
+        run_id: str,
+        blueprint: Dict[str, Any],
+        output_dir: Optional[str] = None,
+    ) -> str:
+        """
+        Generate a dashboard PDF entirely from the stored blueprint data.
+        Used when the frontend cannot capture a screenshot (e.g., Exports page).
+        Produces an A4 landscape PDF with KPIs, data table, and insights.
+        """
+        target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = str(target_dir / f"dashboard_{run_id}_{timestamp}.pdf")
+
+        page_w, page_h = landscape(A3)
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=landscape(A3),
+            rightMargin=1 * cm,
+            leftMargin=1 * cm,
+            topMargin=2 * cm,
+            bottomMargin=2 * cm,
+        )
+
+        story = []
+        styles = self.styles
+
+        # Title
+        story.append(Paragraph(
+            f"Dashboard Report &mdash; Run: {_safe_str(run_id)}",
+            styles["CoverSubtitle"],
+        ))
+        story.append(Paragraph(
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (server-side)",
+            styles["SmallGray"],
+        ))
+        story.append(Spacer(1, 0.6 * cm))
+
+        sections = blueprint.get("sections", [])
+        metadata = blueprint.get("metadata", {})
+
+        # ── KPI Row ──
+        kpi_widgets = []
+        for sec in sections:
+            if sec.get("type") == "kpi_row":
+                kpi_widgets = sec.get("widgets", [])
+                break
+
+        if kpi_widgets:
+            kpi_data = [[
+                Paragraph(_safe_str(w.get("title", "")), styles["Normal"])
+                for w in kpi_widgets
+            ], [
+                Paragraph(f"<b>{_safe_str(w.get('value', ''))}</b>", styles["Normal"])
+                for w in kpi_widgets
+            ]]
+            kpi_table = Table(kpi_data, colWidths=[3.5 * cm] * len(kpi_widgets))
+            kpi_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), BLUE_HEADER),
+                ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+                ("BACKGROUND", (0, 1), (-1, 1), LIGHT_GRAY),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+            ]))
+            story.append(kpi_table)
+            story.append(Spacer(1, 0.5 * cm))
+
+        # ── Data Tables ──
+        for sec in sections:
+            if sec.get("type") != "table":
+                continue
+            for widget in sec.get("widgets", []):
+                w_title = widget.get("title", "Data")
+                columns = widget.get("columns", [])
+                rows = widget.get("data", [])
+
+                if not columns or not rows:
+                    continue
+
+                story.append(Paragraph(_safe_str(w_title), styles["Heading3"]))
+                story.append(Spacer(1, 0.2 * cm))
+
+                # Build header
+                col_keys = [c.get("key", "") for c in columns]
+                header = [Paragraph(f"<b>{_safe_str(c.get('label', c.get('key', '')))}</b>",
+                                    styles["Normal"]) for c in columns]
+
+                # Build rows (max 50 for PDF readability)
+                table_data = [header]
+                for row in rows[:50]:
+                    table_data.append([
+                        Paragraph(_safe_str(row.get(k, "")), styles["Normal"])
+                        for k in col_keys
+                    ])
+
+                # Calculate column widths
+                usable = page_w - 2 * cm
+                col_w = usable / max(len(columns), 1)
+                t = Table(table_data, colWidths=[col_w] * len(columns))
+                t.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+                    ("FONTSIZE", (0, 0), (-1, -1), 7),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D1D5DB")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]))
+                story.append(t)
+                story.append(Spacer(1, 0.5 * cm))
+
+        # ── Donut/Quality sections as summary text ──
+        for sec in sections:
+            if sec.get("type") in ("donut_chart", "card"):
+                story.append(Paragraph(_safe_str(sec.get("title", "")), styles["Heading3"]))
+                for widget in sec.get("widgets", []):
+                    title = widget.get("title", "")
+                    value = widget.get("value", "")
+                    story.append(Paragraph(
+                        f"{_safe_str(title)}: <b>{_safe_str(value)}</b>", styles["Normal"]
+                    ))
+                story.append(Spacer(1, 0.3 * cm))
+
+        if not story or len(story) <= 3:
+            story.append(Paragraph("No dashboard data available.", styles["Normal"]))
+
+        doc.build(story, onFirstPage=self._add_page_footer, onLaterPages=self._add_page_footer)
+        self.logger.info(f"PDF dashboard (blueprint-based) exported: {filename}")
+        return filename
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # MODE 4 — Full Report PDF
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

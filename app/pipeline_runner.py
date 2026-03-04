@@ -43,6 +43,11 @@ from rule_engine.maintenance_rules import (
     TemperatureUptrendRule,
     VibrationSpikeRule,
 )
+from rule_engine.energy_rules import (
+    HighConsumptionDayRule,
+    ConsumptionTrendRule,
+    PeakDemandRule,
+)
 from rule_engine.generic_data_rules import (
     DataSummaryRule,
     HighValueRule,
@@ -169,7 +174,8 @@ class PipelineRunner:
                 output_path=output_path,
             )
             if feature_count <= 0:
-                raise RuntimeError("No features were generated for this run")
+                logger.warning("No features generated — continuing with reduced pipeline")
+                feature_count = 0
 
             current_step = "profiling"
             profiling_result = self._profile_data(
@@ -193,11 +199,15 @@ class PipelineRunner:
             )
 
             current_step = "ml_engine"
-            ml_findings = self._run_ml_analysis(
-                run_id=run_id,
-                output_path=output_path,
-                source_type=resolved_source,
-            )
+            try:
+                ml_findings = self._run_ml_analysis(
+                    run_id=run_id,
+                    output_path=output_path,
+                    source_type=resolved_source,
+                )
+            except (ValueError, RuntimeError) as ml_err:
+                logger.warning(f"ML engine skipped: {ml_err}")
+                ml_findings = []
 
             current_step = "orchestration"
             orchestrator = InsightOrchestrator(logger=logger)
@@ -262,10 +272,15 @@ class PipelineRunner:
 
             current_step = "dashboard_blueprint"
             blueprint_generator = BlueprintGenerator(logger=logger)
+
+            # Load a sample of the raw data for the data-explorer section
+            raw_df_sample = pd.read_parquet(output_path)
+
             dashboard_blueprint = blueprint_generator.generate(
                 run_id=run_id,
                 unified_insights=unified_insights,
                 profiling_results=profiling_result.get("profiles", {}),
+                raw_data_sample=raw_df_sample,
             )
             if not blueprint_generator.validate_blueprint(dashboard_blueprint):
                 raise RuntimeError("Generated dashboard blueprint is invalid")
@@ -989,6 +1004,28 @@ class PipelineRunner:
                     "affected_columns": result.affected_columns,
                 }
             )
+
+        # ── Energy rules (run when energy-like columns exist) ──
+        energy_keywords = {"energy", "kwh", "consumption", "power", "demand", "load", "cost"}
+        has_energy = any(
+            any(kw in col_name.lower() for kw in energy_keywords)
+            for col_name in profiles
+        )
+        if has_energy or source_type == "energy":
+            for energy_rule in (HighConsumptionDayRule(), ConsumptionTrendRule(), PeakDemandRule()):
+                result = energy_rule.evaluate(context)
+                rule_findings.append(
+                    {
+                        "rule_name": result.rule_name,
+                        "rule_id": result.rule_id,
+                        "triggered": result.triggered,
+                        "severity": str(result.severity).upper(),
+                        "confidence": float(result.confidence),
+                        "message": result.message,
+                        "remediation": result.remediation,
+                        "affected_columns": result.affected_columns,
+                    }
+                )
 
         # SAP-oriented rules can still run opportunistically when features exist.
         feature_records = feature_store_repo.get_features_for_run(run_id)

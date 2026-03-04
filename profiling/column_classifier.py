@@ -20,6 +20,7 @@ Output Type Categories:
 
 from typing import Dict, List, Tuple, Any
 from pathlib import Path
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -262,9 +263,11 @@ class ColumnClassifier:
 
         # Try to parse as datetime
         try:
-            pd.to_datetime(series, errors='coerce')
-            # Check how many parsed successfully
-            parsed = pd.to_datetime(series, errors='coerce')
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                pd.to_datetime(series, errors='coerce')
+                # Check how many parsed successfully
+                parsed = pd.to_datetime(series, errors='coerce')
             success_rate = 1 - parsed.isna().sum() / len(series)
 
             if success_rate >= 0.8:

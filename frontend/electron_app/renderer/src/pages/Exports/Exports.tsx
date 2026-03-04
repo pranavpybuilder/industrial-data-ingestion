@@ -202,10 +202,12 @@ const Exports = () => {
 
     let imageBase64: string | null = null;
 
-    // Capture dashboard image if needed
+    // Capture dashboard image if needed (falls back to server-side PDF if capture fails)
     if (card.needsCapture) {
       imageBase64 = await captureDashboardImage();
-      if (!imageBase64) {
+      // If capture failed (dashboard not visible) and this is dashboard_pdf,
+      // pass empty string so backend generates the PDF from blueprint data
+      if (!imageBase64 && card.id !== "dashboard_pdf") {
         setLoadingCard(null);
         setErrorMsg(
           "The dashboard is not currently visible. To capture a dashboard snapshot, " +
@@ -227,7 +229,7 @@ const Exports = () => {
           res = await frontendApi.exportInsightsPdf(activeRun, outputDir);
           break;
         case "dashboard_pdf":
-          res = await frontendApi.exportDashboardPdf(activeRun, imageBase64!, outputDir);
+          res = await frontendApi.exportDashboardPdf(activeRun, imageBase64 || "", outputDir);
           break;
         case "dashboard_json":
           res = await frontendApi.exportDashboardJson(activeRun, outputDir);

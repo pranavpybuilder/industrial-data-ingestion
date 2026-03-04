@@ -14,6 +14,7 @@ Output: Detailed column statistics for data quality assessment
 """
 
 from typing import Dict, List, Any, Optional
+import warnings
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -66,6 +67,19 @@ class ColumnProfile:
 
         return profile
 
+    @staticmethod
+    def _safe_float(val, default: float = 0.0) -> float:
+        """Safely convert to float, handling pd.NA / NAType / None."""
+        if val is None:
+            return default
+        try:
+            result = float(val)
+            if result != result:           # NaN check
+                return default
+            return result
+        except (TypeError, ValueError):
+            return default
+
     def _profile_numeric(self) -> Dict[str, Any]:
         """Profile numeric columns."""
         if len(self.non_null) == 0:
@@ -73,15 +87,19 @@ class ColumnProfile:
 
         numeric_values = pd.to_numeric(self.non_null, errors='coerce').dropna()
 
-        mean_val = float(numeric_values.mean())
-        median_val = float(numeric_values.median())
-        std_val = float(numeric_values.std())
-        min_val = float(numeric_values.min())
-        max_val = float(numeric_values.max())
+        if len(numeric_values) == 0:
+            return {}
+
+        sf = self._safe_float
+        mean_val = sf(numeric_values.mean())
+        median_val = sf(numeric_values.median())
+        std_val = sf(numeric_values.std())
+        min_val = sf(numeric_values.min())
+        max_val = sf(numeric_values.max())
 
         # Quartiles
-        q1 = float(numeric_values.quantile(0.25))
-        q3 = float(numeric_values.quantile(0.75))
+        q1 = sf(numeric_values.quantile(0.25))
+        q3 = sf(numeric_values.quantile(0.75))
         iqr = q3 - q1
 
         # Outliers (IQR method)
@@ -93,8 +111,10 @@ class ColumnProfile:
 
         # Distribution characteristics
         try:
-            skewness = float(stats.skew(numeric_values))
-            kurtosis = float(stats.kurtosis(numeric_values))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                skewness = float(stats.skew(numeric_values))
+                kurtosis = float(stats.kurtosis(numeric_values))
         except Exception:
             skewness = 0.0
             kurtosis = 0.0
@@ -148,7 +168,9 @@ class ColumnProfile:
             return {}
 
         try:
-            dates = pd.to_datetime(self.non_null, errors='coerce').dropna()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                dates = pd.to_datetime(self.non_null, errors='coerce').dropna()
 
             if len(dates) == 0:
                 return {}
@@ -181,7 +203,10 @@ class ColumnProfile:
             return {}
 
         value_counts = self.non_null.value_counts()
-        true_count = value_counts.get(True, 0) or value_counts.get(1, 0) or value_counts.get('True', 0) or value_counts.get('true', 0) or 0
+        true_count = (value_counts.get(True, 0) or value_counts.get(1, 0)
+                      or value_counts.get('True', 0) or value_counts.get('true', 0) or 0)
+        if hasattr(true_count, 'iloc'):
+            true_count = true_count.iloc[0] if len(true_count) > 0 else 0
         false_count = len(self.non_null) - true_count
         true_percentage = (true_count / len(self.non_null)) * 100
 

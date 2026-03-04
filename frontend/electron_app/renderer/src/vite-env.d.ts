@@ -34,11 +34,11 @@ interface FrontendAPI {
 
   // Exports — New 7 handlers
   get_export_history: (run_id: string, callback?: (res: any) => void) => any;
-  export_insights_docx: (run_id: string, callback?: (res: any) => void) => any;
-  export_insights_pdf: (run_id: string, callback?: (res: any) => void) => any;
-  export_dashboard_pdf: (run_id: string, image_data_base64: string, callback?: (res: any) => void) => any;
-  export_dashboard_json: (run_id: string, callback?: (res: any) => void) => any;
-  export_full_report: (run_id: string, image_data_base64: string, callback?: (res: any) => void) => any;
+  export_insights_docx: (run_id: string, output_dir: string, callback?: (res: any) => void) => any;
+  export_insights_pdf: (run_id: string, output_dir: string, callback?: (res: any) => void) => any;
+  export_dashboard_pdf: (run_id: string, image_data_base64: string, output_dir: string, callback?: (res: any) => void) => any;
+  export_dashboard_json: (run_id: string, output_dir: string, callback?: (res: any) => void) => any;
+  export_full_report: (run_id: string, image_data_base64: string, output_dir: string, callback?: (res: any) => void) => any;
   open_export_file: (file_path: string, callback?: (res: any) => void) => any;
 
   // Data Explorer

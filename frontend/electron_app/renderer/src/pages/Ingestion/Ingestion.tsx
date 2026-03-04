@@ -7,16 +7,7 @@ import IngestionStatusBanner from "../../components/ingestion/IngestionStatusBan
 import { frontendApi } from "../../services/frontendApi";
 import { clearActiveRunContext, onRunChange } from "../../state/state_reset";
 
-export type IngestionSource = "SAP" | "RFID" | "PLC" | "EXCEL" | "ENERGY";
 export type IngestionStatus = "idle" | "success" | "failed";
-
-const SOURCE_MAP: Record<IngestionSource, string> = {
-  SAP: "sap",
-  RFID: "rfid",
-  PLC: "plc",
-  EXCEL: "generic_tabular",
-  ENERGY: "energy",
-};
 
 const fadeKeyframes = `
 @keyframes fadeIn {
@@ -26,22 +17,23 @@ const fadeKeyframes = `
 `;
 
 const Ingestion = () => {
-  const [source, setSource] = useState<IngestionSource | null>(null);
   const [filePath, setFilePath] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [fileExt, setFileExt] = useState<string | null>(null);
   const [status, setStatus] = useState<IngestionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   const handleIngest = async () => {
-    if (!source || !filePath) return;
+    if (!filePath) return;
 
     setStatus("idle");
     setError(null);
     setIsRunning(true);
     clearActiveRunContext();
 
-    const result = await frontendApi.uploadFile(filePath, SOURCE_MAP[source]);
+    // Pass no source_type — let the backend auto-detect everything
+    const result = await frontendApi.uploadFile(filePath);
     setIsRunning(false);
 
     if (!result.success) {
@@ -75,24 +67,27 @@ const Ingestion = () => {
           </div>
           <div>
             <h1 style={styles.title}>Data Ingestion</h1>
-            <p style={styles.subtitle}>Run full offline ingestion pipeline (CSV/XLSX).</p>
+            <p style={styles.subtitle}>
+              Upload any CSV or Excel file. Source type, schema, and domain are
+              auto-detected. Multi-sheet workbooks are fully processed.
+            </p>
           </div>
         </header>
 
         <FileUploadCard
-          source={source}
-          onSourceChange={setSource}
           fileName={fileName}
-          onFileSelected={(selectedPath, selectedName) => {
+          fileExt={fileExt}
+          onFileSelected={(selectedPath, selectedName, ext) => {
             setFilePath(selectedPath);
             setFileName(selectedName);
+            setFileExt(ext || null);
             setStatus("idle");
             setError(null);
           }}
         />
 
         <IngestionActions
-          disabled={!filePath || !source || isRunning}
+          disabled={!filePath || isRunning}
           onIngest={handleIngest}
         />
 

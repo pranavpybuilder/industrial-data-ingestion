@@ -2,35 +2,31 @@ import { useRef, useState } from "react";
 import { FiFile, FiUploadCloud } from "react-icons/fi";
 
 import { frontendApi } from "../../services/frontendApi";
-import { IngestionSource } from "../../pages/Ingestion/Ingestion";
+
+/* ---------------------------------------------------------------
+   Accepted extensions shown in the helper text
+--------------------------------------------------------------- */
+const ACCEPTED = ".csv, .xlsx, .xls";
 
 interface Props {
-  source: IngestionSource | null;
-  onSourceChange: (s: IngestionSource) => void;
   fileName: string | null;
-  onFileSelected: (filePath: string, fileName: string) => void;
+  fileExt: string | null;
+  onFileSelected: (filePath: string, fileName: string, ext?: string) => void;
 }
 
-const SOURCES: IngestionSource[] = ["SAP", "RFID", "PLC", "EXCEL", "ENERGY"];
-
-const FileUploadCard = ({
-  source,
-  onSourceChange,
-  fileName,
-  onFileSelected,
-}: Props) => {
+const FileUploadCard = ({ fileName, fileExt, onFileSelected }: Props) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [hoveredSource, setHoveredSource] = useState<string | null>(null);
+  const [isDropHover, setIsDropHover] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
 
+  /* ---------- Desktop native dialog (primary) ---------- */
   const handleBrowse = async () => {
-    if (!source) return;
     setSelectionError(null);
 
-    // Desktop mode: use native dialog so backend receives a real absolute path.
     const picked = await frontendApi.selectFile();
     if (picked.success && picked.data?.file_path) {
-      onFileSelected(picked.data.file_path, picked.data.file_name);
+      const ext = picked.data.file_name?.split(".").pop()?.toLowerCase() || "";
+      onFileSelected(picked.data.file_path, picked.data.file_name, ext);
       return;
     }
 
@@ -42,89 +38,88 @@ const FileUploadCard = ({
     const fallbackPath = (file as any).path || "";
     if (!fallbackPath) {
       setSelectionError(
-        "Browser mode does not expose absolute file paths. Run in desktop shell."
+        "Browser mode can't expose absolute paths. Run inside the desktop shell.",
       );
       return;
     }
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    onFileSelected(fallbackPath, file.name, ext);
+  };
 
-    onFileSelected(fallbackPath, file.name);
+  /* ---------- Badge shown after file selection ---------- */
+  const renderExtBadge = () => {
+    if (!fileExt) return null;
+    const label = fileExt.toUpperCase();
+    const color =
+      fileExt === "xlsx" || fileExt === "xls" ? "#059669" : "#6366f1";
+    return (
+      <span
+        style={{
+          fontSize: "11px",
+          fontWeight: 600,
+          color,
+          background: color + "14",
+          padding: "2px 8px",
+          borderRadius: "6px",
+          marginLeft: "8px",
+        }}
+      >
+        {label}
+      </span>
+    );
   };
 
   return (
     <div style={styles.card}>
-      <h3 style={styles.heading}>Select Source</h3>
+      <h3 style={styles.heading}>Select Data File</h3>
 
-      <div style={styles.sources}>
-        {SOURCES.map((s) => {
-          const isSelected = source === s;
-          const isHovered = hoveredSource === s;
-          return (
-            <button
-              key={s}
-              onClick={() => onSourceChange(s)}
-              onMouseEnter={() => setHoveredSource(s)}
-              onMouseLeave={() => setHoveredSource(null)}
-              style={{
-                ...styles.sourceBtn,
-                background: isSelected
-                  ? "#6366f1"
-                  : isHovered
-                    ? "#e0e7ff"
-                    : "#f3f4f6",
-                color: isSelected ? "#ffffff" : "#111827",
-                boxShadow: isSelected ? "0 2px 8px rgba(99,102,241,0.3)" : "none",
-              }}
-            >
-              {s}
-            </button>
-          );
-        })}
-      </div>
-
+      {/* hidden fallback input */}
       <input
         ref={fileInputRef}
         type="file"
+        accept={ACCEPTED}
         aria-label="Upload file"
-        disabled={!source}
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) {
-            onFallbackPicked(file);
-          }
+          if (file) onFallbackPicked(file);
         }}
       />
 
+      {/* clickable drop-zone */}
       <button
         type="button"
         style={{
           ...styles.dropZone,
-          borderColor: !source ? "#d1d5db" : "#6366f1",
-          opacity: !source ? 0.5 : 1,
-          cursor: !source ? "not-allowed" : "pointer",
+          borderColor: isDropHover ? "#818cf8" : "#6366f1",
+          background: isDropHover ? "#eef2ff" : "#ffffff",
         }}
-        disabled={!source}
         onClick={handleBrowse}
+        onMouseEnter={() => setIsDropHover(true)}
+        onMouseLeave={() => setIsDropHover(false)}
       >
         {fileName ? (
           <div style={styles.fileInfo}>
             <FiFile size={22} color="#6366f1" />
-            <span style={styles.fileName}>{fileName}</span>
+            <span style={styles.fileName}>
+              {fileName}
+              {renderExtBadge()}
+            </span>
           </div>
         ) : (
           <div style={styles.dropContent}>
-            <FiUploadCloud size={32} color="#6366f1" />
-            <span style={styles.dropText}>Click to select a data file</span>
+            <FiUploadCloud size={34} color="#6366f1" />
+            <span style={styles.dropText}>
+              Click to select a data file
+            </span>
             <span style={styles.dropHint}>
-              {source ? `Source: ${source}` : "Select a source first"}
+              Supports {ACCEPTED} &mdash; source type is auto-detected
             </span>
           </div>
         )}
       </button>
 
-      {selectionError && (
-        <p style={styles.error}>{selectionError}</p>
-      )}
+      {selectionError && <p style={styles.error}>{selectionError}</p>}
     </div>
   );
 };
@@ -144,27 +139,12 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 0,
     marginBottom: "16px",
   },
-  sources: {
-    display: "flex",
-    gap: "10px",
-    marginBottom: "20px",
-    flexWrap: "wrap",
-  },
-  sourceBtn: {
-    padding: "8px 16px",
-    borderRadius: "8px",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "13px",
-    fontWeight: 500,
-    transition: "all 0.2s ease",
-  },
   dropZone: {
-    border: "2px dashed #e5e7eb",
+    border: "2px dashed #6366f1",
     borderRadius: "12px",
-    padding: "32px",
+    padding: "36px",
     width: "100%",
-    background: "#ffffff",
+    cursor: "pointer",
     transition: "all 0.2s ease",
   },
   dropContent: {

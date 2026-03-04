@@ -26,7 +26,79 @@ class ExcelReader:
     - multi-row header combination
     - automatic unnamed/empty column cleanup
     - loud and actionable failures
+    - multi-sheet iteration for full workbook ingestion
     """
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Multi-sheet reader — iterates all sheets and returns usable ones
+    # ──────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def read_all_sheets(
+        file_path: str,
+        header: int | None | str = "auto",
+        detect_dates: bool = True,
+        min_rows: int = 1,
+        min_cols: int = 2,
+    ) -> dict[str, pd.DataFrame]:
+        """
+        Read ALL sheets from an Excel workbook and return a dict of
+        sheet_name → DataFrame for every sheet that has usable tabular data.
+
+        Parameters
+        ----------
+        file_path : str
+            Path to the .xlsx / .xls file.
+        header : int | None | str
+            Header detection mode per sheet (default: "auto").
+        detect_dates : bool
+            Whether to validate temporal columns.
+        min_rows : int
+            Minimum data rows for a sheet to be considered usable.
+        min_cols : int
+            Minimum columns for a sheet to be considered usable.
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            Mapping of sheet name → cleaned DataFrame.
+            Empty dict if no usable sheets are found.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Excel file not found: {path}")
+
+        suffix = path.suffix.lower()
+        engines = ExcelReader._engine_candidates(suffix)
+        engine = engines[0] if engines else None
+
+        try:
+            xls = pd.ExcelFile(str(path), engine=engine)
+            sheet_names = list(xls.sheet_names)
+        except Exception:
+            return {}
+
+        results: dict[str, pd.DataFrame] = {}
+
+        for sheet in sheet_names:
+            try:
+                df = ExcelReader.read(
+                    file_path=file_path,
+                    sheet_name=sheet,
+                    header=header,
+                    detect_dates=detect_dates,
+                )
+                if df is not None and len(df) >= min_rows and len(df.columns) >= min_cols:
+                    results[sheet] = df
+            except Exception:
+                # Sheet is unusable (empty, bad format, etc.) — skip it
+                continue
+
+        return results
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Single-sheet reader (original API)
+    # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def read(

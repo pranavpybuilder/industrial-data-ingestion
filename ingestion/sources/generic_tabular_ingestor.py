@@ -192,7 +192,13 @@ class GenericTabularIngestor(BaseIngestor):
         self._detected_domain: str = "generic"
 
     def read(self) -> pd.DataFrame:
-        """Read the raw file using the appropriate reader."""
+        """
+        Read the raw file using the appropriate reader.
+
+        For XLSX files with multiple sheets, reads ALL sheets and
+        concatenates those with compatible schemas into one DataFrame.
+        A ``_sheet_source`` column records which sheet each row came from.
+        """
         path = Path(self.source_path)
         suffix = path.suffix.lower()
 
@@ -200,11 +206,7 @@ class GenericTabularIngestor(BaseIngestor):
             return CSVReader.read(str(path), normalize_columns=True)
 
         if suffix in (".xlsx", ".xls"):
-            return ExcelReader.read(
-                file_path=str(path),
-                sheet_name="auto",
-                header="auto",
-            )
+            return self._read_excel_all_sheets(path)
 
         if suffix == ".json":
             try:
@@ -217,6 +219,69 @@ class GenericTabularIngestor(BaseIngestor):
             f"Unsupported file format '{suffix}'. "
             "Supported formats: .csv, .xlsx, .xls, .json"
         )
+
+    def _read_excel_all_sheets(self, path: Path) -> pd.DataFrame:
+        """
+        Read an Excel workbook, iterating ALL sheets.
+
+        Strategy:
+        1. Read every sheet via ExcelReader.read_all_sheets()
+        2. Score each sheet by row count and column count
+        3. Pick the best sheet as the "primary" schema
+        4. Concatenate all sheets whose columns overlap ≥60% with the primary
+        5. Add a ``_sheet_source`` column so downstream knows the origin
+        6. If only one usable sheet exists, return it as-is (fast path)
+        """
+        all_sheets = ExcelReader.read_all_sheets(
+            file_path=str(path),
+            header="auto",
+            detect_dates=True,
+            min_rows=1,
+            min_cols=2,
+        )
+
+        if not all_sheets:
+            # Fallback: try single-sheet read (may raise on truly empty files)
+            return ExcelReader.read(
+                file_path=str(path),
+                sheet_name="auto",
+                header="auto",
+            )
+
+        if len(all_sheets) == 1:
+            name, df = next(iter(all_sheets.items()))
+            df = df.copy()
+            df["_sheet_source"] = name
+            return df
+
+        # Pick the primary (largest usable sheet)
+        ranked = sorted(
+            all_sheets.items(),
+            key=lambda kv: len(kv[1]) * len(kv[1].columns),
+            reverse=True,
+        )
+        primary_name, primary_df = ranked[0]
+        primary_cols = set(primary_df.columns)
+
+        # Collect compatible sheets (≥60% column overlap with primary)
+        compatible: list[pd.DataFrame] = []
+        for sheet_name, df in ranked:
+            sheet_cols = set(df.columns)
+            if not primary_cols:
+                continue
+            overlap = len(primary_cols & sheet_cols) / len(primary_cols)
+            if overlap >= 0.60:
+                tagged = df.copy()
+                tagged["_sheet_source"] = sheet_name
+                compatible.append(tagged)
+
+        if not compatible:
+            primary_df = primary_df.copy()
+            primary_df["_sheet_source"] = primary_name
+            return primary_df
+
+        combined = pd.concat(compatible, ignore_index=True, sort=False)
+        return combined
 
     def ingest(self) -> dict:
         """
