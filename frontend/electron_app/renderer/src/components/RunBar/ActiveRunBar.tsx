@@ -18,7 +18,7 @@ const ActiveRunBar = () => {
       <div style={styles.label}>
         <span style={styles.labelText}>Active Run:</span>
         <span style={styles.runName}>
-          {runState.activeRunId ?? "None"}
+          {runState.activeFileName || runState.activeRunId || "None"}
         </span>
       </div>
 

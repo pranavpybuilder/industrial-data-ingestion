@@ -1,6 +1,7 @@
 export interface RunMeta {
   run_id: string;
   run_name?: string;
+  file_name?: string;
   source_type?: string;
   status?: string;
   created_at?: string;

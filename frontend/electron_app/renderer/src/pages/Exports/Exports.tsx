@@ -58,10 +58,10 @@ const EXPORT_CARDS: CardConfig[] = [
     id: "dashboard_pdf",
     title: "Dashboard Snapshot (PDF)",
     description:
-      "Captures the current dashboard visualization at 4K resolution and embeds it in an A3 landscape PDF. Navigate to the Dashboard page first to ensure the latest view is captured.",
+      "Navigate to the Dashboard page to capture the current visualization at 4K resolution and export it as PDF.",
     icon: <FiImage size={28} />,
-    emitLabel: "Capture & Export",
-    needsCapture: true,
+    emitLabel: "Go to Dashboard \u2192",
+    needsCapture: false,
   },
   {
     id: "dashboard_json",
@@ -76,10 +76,10 @@ const EXPORT_CARDS: CardConfig[] = [
     id: "full_report",
     title: "Full Report (PDF)",
     description:
-      "Complete unified report: A4 portrait pages for all insights sections, followed by a divider page and the dashboard screenshot on A3 landscape pages. Single PDF file.",
+      "Complete unified report: A4 portrait pages for all insights sections, followed by a dashboard summary page with key metrics. No screenshot needed.",
     icon: <FiLayers size={28} />,
     emitLabel: "Generate Full Report",
-    needsCapture: true,
+    needsCapture: false,
   },
 ];
 
@@ -96,39 +96,6 @@ const fadeKeyframes = `
   to { transform: rotate(360deg); }
 }
 `;
-
-/* ─────────────────────────────────────────
-   Dashboard capture util (html2canvas)
-   ───────────────────────────────────────── */
-
-async function captureDashboardImage(): Promise<string | null> {
-  try {
-    // Dynamically import html2canvas so it doesn't break if not installed
-    const html2canvasModule = await import("html2canvas");
-    const html2canvas = html2canvasModule.default || html2canvasModule;
-
-    // Look for the dashboard canvas container
-    const target =
-      document.getElementById("dashboard-canvas") ||
-      document.querySelector("[data-dashboard-root]") ||
-      document.querySelector(".dashboard-grid");
-
-    if (!target) {
-      return null;
-    }
-
-    const canvas = await html2canvas(target as HTMLElement, {
-      scale: 4, // 4K resolution
-      useCORS: true,
-      backgroundColor: "#f3f4f6",
-      logging: false,
-    });
-
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
-  }
-}
 
 /* ─────────────────────────────────────────
    Main Component
@@ -179,6 +146,12 @@ const Exports = () => {
   const handleExport = async (card: CardConfig) => {
     if (!activeRun || loadingCard) return;
 
+    // Dashboard PDF → navigate to Dashboard page
+    if (card.id === "dashboard_pdf") {
+      navigate("/dashboards");
+      return;
+    }
+
     setLoadingCard(card.id);
     setSuccessCard(null);
     setErrorMsg(null);
@@ -200,24 +173,6 @@ const Exports = () => {
       return;
     }
 
-    let imageBase64: string | null = null;
-
-    // Capture dashboard image if needed (falls back to server-side PDF if capture fails)
-    if (card.needsCapture) {
-      imageBase64 = await captureDashboardImage();
-      // If capture failed (dashboard not visible) and this is dashboard_pdf,
-      // pass empty string so backend generates the PDF from blueprint data
-      if (!imageBase64 && card.id !== "dashboard_pdf") {
-        setLoadingCard(null);
-        setErrorMsg(
-          "The dashboard is not currently visible. To capture a dashboard snapshot, " +
-          "navigate to the Dashboards page and use the \"Export Dashboard\" button in " +
-          "the toolbar. That will capture the live view at 4K resolution."
-        );
-        return;
-      }
-    }
-
     let res: IPCResponse<{ file_path: string }>;
 
     try {
@@ -228,14 +183,11 @@ const Exports = () => {
         case "insights_pdf":
           res = await frontendApi.exportInsightsPdf(activeRun, outputDir);
           break;
-        case "dashboard_pdf":
-          res = await frontendApi.exportDashboardPdf(activeRun, imageBase64 || "", outputDir);
-          break;
         case "dashboard_json":
           res = await frontendApi.exportDashboardJson(activeRun, outputDir);
           break;
         case "full_report":
-          res = await frontendApi.exportFullReport(activeRun, imageBase64!, outputDir);
+          res = await frontendApi.exportFullReport(activeRun, "", outputDir);
           break;
         default:
           res = { success: false, message: "Unknown export mode" };
@@ -289,7 +241,7 @@ const Exports = () => {
           <div>
             <h1 style={s.title}>Export Center</h1>
             <p style={s.subtitle}>
-              Run: <strong>{activeRun}</strong>
+              Run: <strong>{runState.activeFileName || activeRun}</strong>
             </p>
           </div>
         </header>
@@ -430,7 +382,7 @@ const Exports = () => {
                       <td style={s.td}>{row.scope}</td>
                       <td style={s.td}>{row.created_at}</td>
                       <td style={{ ...s.td, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {row.file_path}
+                        {row.file_path.split(/[\\/]/).pop() || row.file_path}
                       </td>
                       <td style={s.td}>
                         {row.file_exists === false ? (

@@ -11,6 +11,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
 from utils.paths import EXPORT_DIR
+from storage.connection import get_run_file_name
 
 
 class ExcelExporter:
@@ -40,8 +41,9 @@ class ExcelExporter:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(out / f"insights_{run_id}_{timestamp}.xlsx")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(out / f"{file_stem}_insights_{date_tag}.xlsx")
         
         workbook = openpyxl.Workbook()
         workbook.remove(workbook.active)
@@ -71,8 +73,9 @@ class ExcelExporter:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(out / f"profiling_{run_id}_{timestamp}.xlsx")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(out / f"{file_stem}_profiling_{date_tag}.xlsx")
         
         workbook = openpyxl.Workbook()
         workbook.remove(workbook.active)
@@ -103,8 +106,9 @@ class ExcelExporter:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(out / f"report_{run_id}_{timestamp}.xlsx")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(out / f"{file_stem}_full_report_{date_tag}.xlsx")
         
         workbook = openpyxl.Workbook()
         workbook.remove(workbook.active)

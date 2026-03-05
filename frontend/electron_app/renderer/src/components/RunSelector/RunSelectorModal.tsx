@@ -8,6 +8,7 @@ import "./RunSelectorModal.css";
 interface RunMeta {
   run_id: string;
   run_name?: string;
+  file_name?: string;
   source_type?: string;
   status?: string;
   created_at?: string;
@@ -46,14 +47,15 @@ const RunSelectorModal = ({ onClose }: Props) => {
     return runs.filter((run) => {
       return (
         run.run_id.toLowerCase().includes(needle) ||
+        (run.file_name || "").toLowerCase().includes(needle) ||
         (run.run_name || "").toLowerCase().includes(needle) ||
         (run.source_type || "").toLowerCase().includes(needle)
       );
     });
   }, [runs, search]);
 
-  const handleSelectRun = (runId: string) => {
-    onRunChange(runId);
+  const handleSelectRun = (run: RunMeta) => {
+    onRunChange(run.run_id, run.file_name);
     onClose();
   };
 
@@ -116,25 +118,35 @@ const RunSelectorModal = ({ onClose }: Props) => {
             )}
 
             {!loading &&
-              filteredRuns.map((run) => (
+              filteredRuns.map((run) => {
+                const displayName = run.file_name || run.run_id;
+                const dateStr = run.created_at
+                  ? new Date(run.created_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : "";
+                return (
                 <div
                   key={run.run_id}
                   className="run-item"
-                  onClick={() => handleSelectRun(run.run_id)}
+                  onClick={() => handleSelectRun(run)}
                 >
                   <div className="run-details">
-                    <span className="run-id">{run.run_id}</span>
-                    {(run.run_name || run.source_type || run.status) && (
+                    <span className="run-id">{displayName}</span>
+                    {dateStr && (
                       <span className="run-meta">
-                        {[run.run_name, run.source_type, run.status]
-                          .filter(Boolean)
-                          .join(" | ")}
+                        {dateStr}
                       </span>
                     )}
                   </div>
                   <div className="run-arrow">-&gt;</div>
                 </div>
-              ))}
+              );
+              })}
           </div>
         </div>
 

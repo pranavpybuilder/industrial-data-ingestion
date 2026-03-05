@@ -26,6 +26,7 @@ from storage.repositories.dashboard_repo import DashboardRepository
 from storage.repositories.export_repo import ExportRepository
 from storage.repositories.insight_repo import InsightRepository
 from storage.repositories.run_repo import RunRepository
+from storage.connection import get_run_file_name
 from utils.paths import EXPORT_DIR
 from utils.logger import get_logger
 
@@ -282,8 +283,9 @@ def export_dashboard_json_ipc(run_id: str, output_dir: str = "") -> Dict[str, An
 
         resolved_dir = Path(output_dir) if output_dir else _get_run_export_dir(run_id)
         resolved_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(resolved_dir / f"dashboard_layout_{run_id}_{timestamp}.json")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(resolved_dir / f"{file_stem}_dashboard_layout_{date_tag}.json")
 
         payload = {
             "format_version": "1.0",
@@ -315,18 +317,16 @@ def export_dashboard_json_ipc(run_id: str, output_dir: str = "") -> Dict[str, An
 # 5. exportFullReport(runId, imageDataBase64)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def export_full_report_ipc(run_id: str, image_data_base64: str, output_dir: str = "") -> Dict[str, Any]:
-    """MODE 4 — Generate full report PDF (insights A4 + dashboard A3)."""
+def export_full_report_ipc(run_id: str, image_data_base64: str = "", output_dir: str = "") -> Dict[str, Any]:
+    """MODE 4 — Generate full report PDF (insights A4 + optional dashboard image)."""
     if not run_id:
         return {"success": False, "message": "Run ID is required"}
-    if not image_data_base64:
-        return {"success": False, "message": "Dashboard image data is required"}
 
     try:
         from export.pdf_exporter import PDFExporter
 
         # Strip data URI prefix if present
-        if "," in image_data_base64:
+        if image_data_base64 and "," in image_data_base64:
             image_data_base64 = image_data_base64.split(",", 1)[1]
 
         insights, profiling, err = _load_insights_and_profiling(run_id)

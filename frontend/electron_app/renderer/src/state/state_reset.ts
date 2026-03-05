@@ -10,7 +10,7 @@ import { clearDashboardForRun } from "../services/dashboardPersistenceService";
  * Centralized handler for run changes.
  * This is the ONLY place where cross-state side effects are allowed.
  */
-export function onRunChange(runId: string) {
+export function onRunChange(runId: string, fileName?: string) {
   const previousRunId = runUI.getSnapshot().activeRunId;
   const normalizedRunId = (runId || "").trim();
 
@@ -22,7 +22,7 @@ export function onRunChange(runId: string) {
   if (!normalizedRunId) {
     runUI.clearRun();
   } else {
-    runUI.setActiveRun(normalizedRunId);
+    runUI.setActiveRun(normalizedRunId, fileName);
   }
 }
 

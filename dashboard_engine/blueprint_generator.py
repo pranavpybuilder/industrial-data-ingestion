@@ -12,6 +12,13 @@ from datetime import datetime
 from dashboard_engine.chart_selector import ChartSelector
 from dashboard_engine.layout_rules import LayoutRules
 
+# Identifier column patterns — never create metric cards from these
+_ID_KEYWORDS = ("_id", "_no", "_number", "_code", "order", "notification")
+_ID_EXACT_NAMES = frozenset({
+    "id", "code", "order_number", "notification", "equipment_id",
+    "work_order", "work_order_number",
+})
+
 
 class DashboardBlueprint:
     """
@@ -53,33 +60,29 @@ class BlueprintGenerator:
                  profiling_results: Dict[str, Any],
                  raw_data_sample: Any = None) -> DashboardBlueprint:
         """
-        Generate complete dashboard blueprint — DATA-CENTRIC layout.
-        
-        Layout priority:
-          1. KPI Overview Row (compact: rows, columns, health, insights count)
-          2. Data Explorer Table (MAIN section — the actual ingested data, ~80%)
-          3. Column Profile Summary (compact stats table)
-          4. Insights Summary (compact — only top findings, ~10%)
-        
+        Generate dashboard blueprint with exactly TWO sections:
+          1. Charts & Data Visualizations — auto-generated from actual data columns
+          2. Intelligence Findings — ML/Rule insights as cards
+
         Args:
             run_id: Run identifier
             unified_insights: List from Module 5 orchestration
             profiling_results: From Module 2 profiling
             raw_data_sample: Optional DataFrame with ingested data
-        
+
         Returns:
             DashboardBlueprint ready for frontend
         """
-        
-        self.logger.info("Generating data-centric dashboard blueprint...")
-        
+
+        self.logger.info("Generating 2-section dashboard blueprint...")
+
         blueprint = DashboardBlueprint(run_id)
-        
+
         try:
             profiles = profiling_results if isinstance(profiling_results, dict) else {}
 
             critical_insights = [
-                i for i in unified_insights 
+                i for i in unified_insights
                 if i.get("severity") == "CRITICAL"
             ]
             warning_insights = [
@@ -87,33 +90,15 @@ class BlueprintGenerator:
                 if i.get("severity") == "WARNING"
             ]
 
-            # ── Row 1: KPI Overview (compact) ───────────────
-            kpi_section = self._create_kpi_section(profiles, unified_insights)
-            blueprint.sections.append(kpi_section)
+            # ── Section 1: Charts & Data Visualizations ─────
+            charts_section = self._create_charts_section(profiles, raw_data_sample)
+            blueprint.sections.append(charts_section)
 
-            # ── Row 2: DATA EXPLORER TABLE (main section) ───
-            if raw_data_sample is not None:
-                explorer_section = self._create_data_explorer_section(raw_data_sample)
-                if explorer_section:
-                    blueprint.sections.append(explorer_section)
+            # ── Section 2: Intelligence Findings ────────────
+            findings_section = self._create_findings_section(unified_insights)
+            blueprint.sections.append(findings_section)
 
-            # ── Row 3: Column Profile (compact donut + summary) ─
-            donut_section = self._create_donut_chart_section(profiles)
-            if donut_section:
-                blueprint.sections.append(donut_section)
-
-            # ── Row 4: Data Quality cards (compact) ───────────
-            if profiles:
-                quality_section = self._create_quality_section(profiles)
-                blueprint.sections.append(quality_section)
-
-            # ── Row 5: Insights Summary (compact — top alerts only) ─
-            if unified_insights:
-                summary_section = self._create_compact_insights_section(unified_insights)
-                blueprint.sections.append(summary_section)
-            
             # Metadata
-            # Calculate data_health from profiles
             _total_cells = 0
             _total_missing = 0
             for _cp in profiles.values():
@@ -123,6 +108,9 @@ class BlueprintGenerator:
                     _total_missing += int(_cp.get("null_count", 0))
             _data_health = round(100.0 * (1.0 - _total_missing / max(_total_cells, 1)), 1)
 
+            # Detect filter columns for frontend dynamic filters
+            filter_meta = self._detect_filter_meta(profiles, raw_data_sample)
+
             blueprint.metadata = {
                 "total_insights": len(unified_insights),
                 "critical_count": len(critical_insights),
@@ -130,19 +118,382 @@ class BlueprintGenerator:
                 "data_health": _data_health,
                 "sections": len(blueprint.sections),
                 "generated_at": datetime.utcnow().isoformat(),
+                "filterMeta": filter_meta,
             }
-            
+
             self.logger.info(f"Blueprint generated: {len(blueprint.sections)} sections")
-            
+
             return blueprint
-        
+
         except Exception as e:
             self.logger.error(f"Blueprint generation error: {e}", exc_info=True)
             return blueprint
-    
+
+    # ─────────────────────────────────────────────────────────
+    # Section 1: Charts & Data Visualizations
+    # ─────────────────────────────────────────────────────────
+
+    def _create_charts_section(self, profiles: Dict[str, Any],
+                               raw_df: Any = None) -> Dict[str, Any]:
+        """Auto-generate charts from actual data columns.
+
+        Rules:
+        - datetime + numeric → Line chart
+        - categorical ≤10 unique + counts → Bar chart
+        - categorical ≤6 unique + percentage → Donut chart
+        - two numeric columns → Scatter chart
+        - single numeric KPI-like column → Metric card
+        """
+        widgets: List[Dict[str, Any]] = []
+        widget_id = 0
+
+        df: Optional[pd.DataFrame] = None
+        if raw_df is not None and isinstance(raw_df, pd.DataFrame) and len(raw_df) > 0:
+            df = raw_df
+
+        # Classify columns from profiles
+        numeric_cols: List[str] = []
+        categorical_cols: List[str] = []
+        datetime_cols: List[str] = []
+
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            dtype = str(col_prof.get("detected_type", "unknown")).lower()
+            mean_v = col_prof.get("mean")
+            if dtype in ("datetime", "date", "timestamp"):
+                datetime_cols.append(col_name)
+            elif dtype in ("numeric", "float", "int", "integer", "number") or (
+                mean_v is not None and isinstance(mean_v, (int, float))
+            ):
+                numeric_cols.append(col_name)
+            elif dtype in ("boolean", "bool"):
+                categorical_cols.append(col_name)
+            else:
+                categorical_cols.append(col_name)
+
+        # Also detect datetime/numeric from raw DataFrame dtypes
+        if df is not None:
+            for col in df.columns:
+                col_str = str(col)
+                if col_str in numeric_cols or col_str in datetime_cols or col_str in categorical_cols:
+                    continue
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    datetime_cols.append(col_str)
+                elif pd.api.types.is_numeric_dtype(df[col]):
+                    numeric_cols.append(col_str)
+                else:
+                    categorical_cols.append(col_str)
+
+        # ── 1) Line charts: datetime + numeric ──
+        if datetime_cols and numeric_cols and df is not None:
+            dt_col = datetime_cols[0]
+            for num_col in numeric_cols[:3]:
+                try:
+                    sample = df[[dt_col, num_col]].dropna().head(200)
+                    if len(sample) < 2:
+                        continue
+                    chart_data = []
+                    for _, row in sample.iterrows():
+                        x_val = row[dt_col]
+                        if hasattr(x_val, "isoformat"):
+                            x_val = x_val.isoformat()
+                        chart_data.append({"x": str(x_val), "y": float(row[num_col])})
+                    widget_id += 1
+                    widgets.append({
+                        "id": f"chart_line_{widget_id}",
+                        "type": "line_chart",
+                        "title": f"{str(num_col).replace('_', ' ').title()} over Time",
+                        "chart_config": {"color": "#6366f1"},
+                        "data": chart_data,
+                    })
+                except Exception:
+                    continue
+
+        # ── 2) Bar charts: categorical ≤10 unique ──
+        for cat_col in categorical_cols[:4]:
+            try:
+                if df is not None and cat_col in df.columns:
+                    series = df[cat_col].dropna().astype(str)
+                else:
+                    continue
+                nunique = series.nunique()
+                if nunique < 1 or nunique > 10:
+                    continue
+                counts = series.value_counts().head(10)
+                chart_data = [{"label": str(k), "value": int(v)} for k, v in counts.items()]
+                widget_id += 1
+                widgets.append({
+                    "id": f"chart_bar_{widget_id}",
+                    "type": "bar_chart",
+                    "title": f"{str(cat_col).replace('_', ' ').title()} Distribution",
+                    "chart_config": {"orientation": "horizontal", "color": "#8b5cf6", "showValues": True},
+                    "data": chart_data,
+                })
+            except Exception:
+                continue
+
+        # ── 3) Donut charts: categorical ≤6 unique ──
+        for cat_col in categorical_cols[:4]:
+            try:
+                if df is not None and cat_col in df.columns:
+                    series = df[cat_col].dropna().astype(str)
+                else:
+                    continue
+                nunique = series.nunique()
+                if nunique < 2 or nunique > 6:
+                    continue
+                counts = series.value_counts()
+                chart_data = [{"label": str(k), "value": int(v)} for k, v in counts.items()]
+                # Check we haven't already made a bar chart for the same column
+                existing_titles = [w.get("title", "") for w in widgets]
+                donut_title = f"{str(cat_col).replace('_', ' ').title()} Breakdown"
+                if any(str(cat_col).replace('_', ' ').title() in t for t in existing_titles):
+                    continue
+                widget_id += 1
+                widgets.append({
+                    "id": f"chart_donut_{widget_id}",
+                    "type": "donut_chart",
+                    "title": donut_title,
+                    "chart_config": {"colors": ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"], "innerRadius": "60%"},
+                    "data": chart_data,
+                })
+            except Exception:
+                continue
+
+        # ── 4) Scatter: two numeric columns ──
+        if len(numeric_cols) >= 2 and df is not None:
+            try:
+                col_x, col_y = numeric_cols[0], numeric_cols[1]
+                sample = df[[col_x, col_y]].dropna().head(200)
+                if len(sample) >= 5:
+                    chart_data = [
+                        {"x": str(round(float(row[col_x]), 2)), "y": float(row[col_y])}
+                        for _, row in sample.iterrows()
+                    ]
+                    widget_id += 1
+                    widgets.append({
+                        "id": f"chart_scatter_{widget_id}",
+                        "type": "scatter_chart",
+                        "title": f"{str(col_x).replace('_', ' ').title()} vs {str(col_y).replace('_', ' ').title()}",
+                        "chart_config": {"color": "#14b8a6"},
+                        "data": chart_data,
+                    })
+            except Exception:
+                pass
+
+        # ── 5) Metric cards: top numeric KPI-like columns ──
+        # Skip identifier columns (IDs, order numbers, codes)
+        def _is_id(col: str) -> bool:
+            low = col.lower()
+            if low in _ID_EXACT_NAMES:
+                return True
+            if any(kw in low for kw in _ID_KEYWORDS):
+                return True
+            if df is not None and col in df.columns:
+                try:
+                    avg_len = df[col].dropna().head(20).astype(str).str.replace(
+                        r'[^0-9]', '', regex=True
+                    ).str.len().mean()
+                    if avg_len > 7:
+                        return True
+                except Exception:
+                    pass
+            return False
+
+        metric_cols = [c for c in numeric_cols if not _is_id(c)]
+        for num_col in metric_cols[:4]:
+            prof = profiles.get(num_col, {})
+            if not isinstance(prof, dict):
+                continue
+            mean_v = prof.get("mean")
+            if mean_v is None:
+                continue
+            widget_id += 1
+            widgets.append({
+                "id": f"metric_{widget_id}",
+                "type": "kpi",
+                "title": str(num_col).replace("_", " ").title(),
+                "value": round(float(mean_v), 2),
+                "unit": "",
+                "color": "#6366f1",
+                "subtitle": f"Avg of {len(metric_cols)} metric columns" if widget_id == 1 else "",
+            })
+            if len(widgets) >= 12:
+                break
+
+        # ── 6) Column type distribution donut (always add) ──
+        type_counts: Dict[str, int] = {}
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            dtype = str(col_prof.get("detected_type", "unknown")).lower()
+            mean_v = col_prof.get("mean")
+            if dtype in ("numeric", "float", "int", "integer", "number") or (
+                mean_v is not None and isinstance(mean_v, (int, float))
+            ):
+                category = "Numeric"
+            elif dtype in ("datetime", "date", "timestamp"):
+                category = "Date/Time"
+            elif dtype in ("boolean", "bool"):
+                category = "Boolean"
+            else:
+                category = "Text"
+            type_counts[category] = type_counts.get(category, 0) + 1
+
+        if type_counts:
+            widget_id += 1
+            widgets.append({
+                "id": f"chart_donut_types_{widget_id}",
+                "type": "donut_chart",
+                "title": "Column Type Distribution",
+                "chart_config": {"colors": ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6"], "innerRadius": "60%"},
+                "data": [{"label": k, "value": v} for k, v in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)],
+            })
+
+        if not widgets:
+            widgets.append({
+                "id": "no_charts",
+                "type": "kpi",
+                "title": "No chart data available",
+                "value": 0,
+                "color": "#94a3b8",
+            })
+
+        return {
+            "id": f"section_charts_{uuid.uuid4().hex[:8]}",
+            "title": "\U0001f4ca Charts & Data Visualizations",
+            "type": "charts",
+            "widgets": widgets,
+            "layout": {"columns": 12, "fullWidth": True},
+        }
+
+    # ─────────────────────────────────────────────────────────
+    # Section 2: Intelligence Findings
+    # ─────────────────────────────────────────────────────────
+
+    def _create_findings_section(self, insights: List[Dict]) -> Dict[str, Any]:
+        """Create intelligence findings as individual insight cards."""
+        widgets: List[Dict[str, Any]] = []
+
+        sorted_insights = sorted(
+            insights,
+            key=lambda i: float(i.get("priority_score", 0.0)),
+            reverse=True,
+        )
+
+        for idx, insight in enumerate(sorted_insights[:20]):
+            severity = str(insight.get("severity", "INFO")).upper()
+            color_map = {"CRITICAL": "#ef4444", "WARNING": "#f59e0b", "INFO": "#3b82f6"}
+
+            # Use plain English title — never show raw scores like 0.9075
+            title = insight.get("title", "Finding")
+            try:
+                float(title)
+                title = insight.get("description", "Finding")[:60] or "Finding"
+            except (ValueError, TypeError):
+                pass
+
+            widgets.append({
+                "id": f"finding_{idx}",
+                "type": "insight_card",
+                "title": title,
+                "severity": severity,
+                "description": insight.get("description", ""),
+                "color": color_map.get(severity, "#3b82f6"),
+                "metrics": {
+                    "source": insight.get("source", ""),
+                    "priority": insight.get("priority_tier", ""),
+                    "action": insight.get("action_type", ""),
+                },
+            })
+
+        if not widgets:
+            widgets.append({
+                "id": "no_findings",
+                "type": "insight_card",
+                "title": "No findings",
+                "severity": "INFO",
+                "description": "No intelligence findings were generated.",
+                "color": "#94a3b8",
+            })
+
+        return {
+            "id": f"section_findings_{uuid.uuid4().hex[:8]}",
+            "title": "\U0001f4a1 Intelligence Findings",
+            "type": "findings",
+            "widgets": widgets,
+            "layout": {"columns": 12, "fullWidth": True},
+        }
     
     # ─────────────────────────────────────────────────────────
-    # NEW: KPI Overview Section
+    # Filter metadata for frontend dynamic filters
+    # ─────────────────────────────────────────────────────────
+
+    def _detect_filter_meta(self, profiles: Dict[str, Any],
+                            raw_df: Any = None) -> Dict[str, Any]:
+        """Detect columns suitable for frontend filters."""
+        meta: Dict[str, Any] = {
+            "timeColumn": None,
+            "resourceColumn": None,
+            "categoryColumn": None,
+            "categoryValues": [],
+            "resourceValues": [],
+        }
+
+        df = raw_df if isinstance(raw_df, pd.DataFrame) and len(raw_df) > 0 else None
+
+        # Find datetime column
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            dtype = str(col_prof.get("detected_type", "")).lower()
+            if dtype in ("datetime", "date", "timestamp"):
+                meta["timeColumn"] = col_name
+                break
+
+        if not meta["timeColumn"] and df is not None:
+            for col in df.columns:
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    meta["timeColumn"] = str(col)
+                    break
+
+        # Find resource/equipment column
+        resource_keywords = [
+            "equipment", "machine", "resource", "asset", "device", "meter", "station",
+        ]
+        for col_name in profiles:
+            name_lower = str(col_name).lower()
+            if any(kw in name_lower for kw in resource_keywords):
+                meta["resourceColumn"] = col_name
+                if df is not None and col_name in df.columns:
+                    vals = df[col_name].dropna().astype(str).unique()
+                    meta["resourceValues"] = sorted(set(str(v) for v in vals[:20]))
+                break
+
+        # Find main categorical column
+        exclude_resource = meta.get("resourceColumn")
+        for col_name, col_prof in profiles.items():
+            if not isinstance(col_prof, dict):
+                continue
+            if col_name == exclude_resource:
+                continue
+            dtype = str(col_prof.get("detected_type", "")).lower()
+            if dtype in ("numeric", "float", "int", "integer", "number",
+                         "datetime", "date", "timestamp"):
+                continue
+            nunique = col_prof.get("unique_count", col_prof.get("nunique", 0))
+            if isinstance(nunique, (int, float)) and 2 <= nunique <= 15:
+                meta["categoryColumn"] = col_name
+                if df is not None and col_name in df.columns:
+                    vals = df[col_name].dropna().astype(str).unique()
+                    meta["categoryValues"] = sorted(set(str(v) for v in vals[:20]))
+                break
+
+        return meta
+
+    # ─────────────────────────────────────────────────────────
+    # Legacy methods kept for backward compatibility
     # ─────────────────────────────────────────────────────────
 
     def _create_kpi_section(self, profiles: Dict[str, Any],

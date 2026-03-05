@@ -1,5 +1,5 @@
 ﻿/**
- * Dashboards.tsx â€” Redesigned Power BI-style dashboard
+ * Dashboards.tsx — Redesigned Power BI-style dashboard
  * Inspired by Stitch mockup: KPI cards, area/bar/donut charts, alerts table
  */
 
@@ -103,6 +103,7 @@ const Dashboards = () => {
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [alertSearch, setAlertSearch] = useState("");
+    const [drillFilter, setDrillFilter] = useState<{ column: string; value: string } | null>(null);
 
     // â”€â”€ Load â”€â”€
     const loadDashboard = async () => {
@@ -193,6 +194,30 @@ const Dashboards = () => {
 
         if (!totalInsights) totalInsights = allWidgets.length;
         return { totalInsights, critical, warnings, dataHealth };
+    }, [allWidgets, dashboard]);
+
+    // Filter metadata from blueprint
+    const filterMeta = useMemo(() => {
+        const meta = dashboard?.metadata?.filterMeta;
+        if (!meta || typeof meta !== "object") return null;
+        return meta as {
+            timeColumn?: string; resourceColumn?: string;
+            categoryColumn?: string; categoryValues?: string[];
+            resourceValues?: string[];
+        };
+    }, [dashboard]);
+
+    // Total record count (from first section with chart data)
+    const totalRecordCount = useMemo(() => {
+        let total = 0;
+        for (const w of allWidgets) {
+            if (w.type === "bar_chart" || w.type === "donut_chart") {
+                const arr = Array.isArray(w.data) ? w.data : [];
+                const sum = arr.reduce((s: number, d: any) => s + (Number(d.value) || 0), 0);
+                if (sum > total) total = sum;
+            }
+        }
+        return total || Number(dashboard?.metadata?.total_rows) || 0;
     }, [allWidgets, dashboard]);
 
     // Section groups
@@ -290,8 +315,8 @@ return (
                     </button>
                     <div>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <h1 style={S.headerTitle}>{run.activeRunId}</h1>
-                            <span style={S.badge}>OPERATIONAL OVERVIEW</span>
+                            <h1 style={S.headerTitle}>{run.activeFileName || run.activeRunId}</h1>
+                            <span style={S.badge}>DASHBOARD</span>
                         </div>
                         {lastSavedDisplay && (
                             <span style={S.savedPill}>âœ“ Saved {lastSavedDisplay}</span>
@@ -312,21 +337,6 @@ return (
                 </div>
             </header>
 
-            {/* â”€â”€ KPI Cards Row â”€â”€ */}
-            <div style={S.kpiRow}>
-                <KpiTopCard label="Total Insights" value={kpiSummary.totalInsights}
-                    trend="+12% from last run" trendDir="up" accent={COLORS.primary}
-                    icon={<FiBarChart2 size={18} />} />
-                <KpiTopCard label="Critical Alerts" value={kpiSummary.critical}
-                    trend="Action Required" trendDir="down" accent={COLORS.danger}
-                    icon={<FiAlertTriangle size={18} />} />
-                <KpiTopCard label="Warning Alerts" value={kpiSummary.warnings}
-                    trend="Stable" trendDir="flat" accent={COLORS.warning}
-                    icon={<FiAlertCircle size={18} />} />
-                <KpiTopCard label="Data Health" value={`${kpiSummary.dataHealth}%`}
-                    trend="Optimal Performance" trendDir="up" accent={COLORS.success}
-                    icon={<FiCheckCircle size={18} />} />
-            </div>
 
             {error && <div style={S.errorBanner}>{error}</div>}
             {!error && message && <div style={S.infoBanner}>{message}</div>}
@@ -340,39 +350,75 @@ return (
                             <FiSliders size={14} /> <span>FILTERS</span>
                         </div>
 
-                        <label style={S.filterLabel}>
-                            TIME RANGE
-                            <select style={S.select} value={layout.slicers.timeRange}
-                                onChange={(e) => updateSlicer("timeRange", e.target.value as any)}>
-                                <option value="all">All Time</option>
-                                <option value="7d">Last 7 Days</option>
-                                <option value="30d">Last 30 Days</option>
-                                <option value="90d">Last 90 Days</option>
-                            </select>
-                        </label>
+                        {/* TIME RANGE — show only if datetime column exists */}
+                        {(!filterMeta || filterMeta.timeColumn) && (
+                            <label style={S.filterLabel}>
+                                TIME RANGE
+                                <select style={S.select} value={layout.slicers.timeRange}
+                                    onChange={(e) => updateSlicer("timeRange", e.target.value as any)}>
+                                    <option value="all">All Time</option>
+                                    <option value="7d">Last 7 Days</option>
+                                    <option value="30d">Last 30 Days</option>
+                                    <option value="90d">Last 90 Days</option>
+                                </select>
+                            </label>
+                        )}
 
+                        {/* RESOURCE / EQUIPMENT — dynamic label + values */}
                         <label style={S.filterLabel}>
-                            RESOURCE
+                            {filterMeta?.resourceColumn
+                                ? filterMeta.resourceColumn.replace(/_/g, " ").toUpperCase()
+                                : "RESOURCE"}
                             <select style={S.select} value={layout.slicers.machine}
                                 onChange={(e) => updateSlicer("machine", e.target.value)}>
-                                <option value="all">All Resources</option>
-                                {machineOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                                <option value="all">
+                                    All {filterMeta?.resourceColumn
+                                        ? filterMeta.resourceColumn.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())
+                                        : "Resources"}
+                                </option>
+                                {(filterMeta?.resourceValues && filterMeta.resourceValues.length > 0
+                                    ? filterMeta.resourceValues
+                                    : machineOptions
+                                ).slice(0, 20).map((o: string) => (
+                                    <option key={o} value={o}>{o}</option>
+                                ))}
                             </select>
                         </label>
 
-                        <label style={S.filterLabel}>
-                            SEVERITY
-                            <div style={S.checkboxGroup}>
-                                {["Critical", "Warning", "Info"].map((sev) => (
-                                    <label key={sev} style={S.checkboxLabel}>
-                                        <input type="checkbox" defaultChecked style={S.checkbox} />
-                                        <span>{sev}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </label>
+                        {/* CATEGORY — dynamic from backend filterMeta */}
+                        {filterMeta?.categoryColumn && filterMeta.categoryValues && filterMeta.categoryValues.length > 0 ? (
+                            <label style={S.filterLabel}>
+                                {filterMeta.categoryColumn.replace(/_/g, " ").toUpperCase()}
+                                <select style={S.select} value={layout.slicers.failureType}
+                                    onChange={(e) => updateSlicer("failureType", e.target.value)}>
+                                    <option value="all">All Categories</option>
+                                    {filterMeta.categoryValues.map((val: string) => (
+                                        <option key={val} value={val}>{val}</option>
+                                    ))}
+                                </select>
+                            </label>
+                        ) : (
+                            <label style={S.filterLabel}>
+                                CATEGORY
+                                <select style={S.select} value={layout.slicers.failureType}
+                                    onChange={(e) => updateSlicer("failureType", e.target.value)}>
+                                    <option value="all">All Categories</option>
+                                    {failureTypeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                            </label>
+                        )}
 
-                        <button style={S.resetBtn} onClick={resetSlicers}>Reset Filters</button>
+                        {/* Drill filter indicator */}
+                        {drillFilter && (
+                            <div style={{ padding: "8px 10px", background: COLORS.primaryBg, border: `1px solid ${COLORS.primaryLight}40`, borderRadius: 8, fontSize: 11 }}>
+                                <div style={{ fontWeight: 700, color: COLORS.primary, marginBottom: 4 }}>DRILL FILTER</div>
+                                <div style={{ color: COLORS.text }}>{drillFilter.column}: <strong>{drillFilter.value}</strong></div>
+                                <button style={{ ...S.resetBtn, marginTop: 6, fontSize: 10, padding: "4px 8px" }}
+                                    onClick={() => setDrillFilter(null)}>&times; Clear filter</button>
+                            </div>
+                        )}
+
+                        <button style={S.resetBtn} onClick={() => { resetSlicers(); setDrillFilter(null); }}>Reset Filters</button>
 
                         {layout.hidden_widgets.length > 0 && (
                             <div style={S.hiddenSection}>
@@ -398,8 +444,28 @@ return (
                         <button style={S.iconBtnGhost} onClick={() => setSidebarOpen((v) => !v)} title="Toggle filters">
                             <FiSliders size={14} />
                         </button>
-                        <span style={S.sectionLabel}>OPERATIONAL OVERVIEW</span>
+                        <span style={S.sectionLabel}>DASHBOARD</span>
+                        {totalRecordCount > 0 && (
+                            <span style={{ fontSize: 11, color: COLORS.textMuted, marginLeft: "auto" }}>
+                                {totalRecordCount.toLocaleString()} records
+                            </span>
+                        )}
                     </div>
+
+                    {/* Drill filter banner */}
+                    {drillFilter && (
+                        <div style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            padding: "6px 14px", marginBottom: 12, borderRadius: 8,
+                            background: COLORS.primaryBg, border: `1px solid ${COLORS.primaryLight}40`,
+                            fontSize: 12, color: COLORS.primary,
+                        }}>
+                            <FiTarget size={13} />
+                            <span>Filtered by: <strong>{drillFilter.value}</strong></span>
+                            <button style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: COLORS.primary, fontWeight: 600, fontSize: 12 }}
+                                onClick={() => setDrillFilter(null)}>&times; Clear</button>
+                        </div>
+                    )}
 
                     {loading && <SkeletonGrid />}
 
@@ -424,7 +490,17 @@ return (
                                     const widget = widgetsById[widgetId];
                                     if (!widget) return null;
                                     const visualType = layout.widget_visuals[widgetId] ?? autoVisualType(widget);
-                                    const filteredData = applySlicers(widget.data, layout.slicers);
+                                    const slicedData = applySlicers(widget.data, layout.slicers);
+                                    // Apply drill filter: for charts with label-based data, filter to matching value
+                                    const filteredData = drillFilter && Array.isArray(slicedData)
+                                        ? slicedData.filter((d: any) => {
+                                            const label = String(d.label || d.name || d.x || "");
+                                            return label === drillFilter.value;
+                                        })
+                                        : slicedData;
+                                    // If drill filter resulted in empty data, show all (don't break charts)
+                                    const chartData = (Array.isArray(filteredData) && filteredData.length === 0 && drillFilter)
+                                        ? slicedData : filteredData;
                                     const isDraggingOver = dragOverId === widgetId && draggingId !== widgetId;
 
                                     return (
@@ -468,7 +544,7 @@ return (
                                                 </div>
                                             </div>
                                             <div style={S.cardBody}>
-                                                <WidgetContent widget={widget} visualType={visualType} filteredData={filteredData} />
+                                                <WidgetContent widget={widget} visualType={visualType} filteredData={chartData} onDrill={setDrillFilter} />
                                             </div>
                                         </div>
                                     );
@@ -515,13 +591,98 @@ const KpiTopCard = ({ label, value, trend, trendDir, accent, icon }: {
 
 // â”€â”€â”€ Widget Content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-interface WidgetContentProps { widget: DashboardWidget; visualType: VisualType; filteredData: any; }
+interface WidgetContentProps {
+    widget: DashboardWidget; visualType: VisualType; filteredData: any;
+    onDrill?: (filter: { column: string; value: string } | null) => void;
+}
 
-const WidgetContent = ({ widget, visualType, filteredData }: WidgetContentProps) => {
+const WidgetContent = ({ widget, visualType, filteredData, onDrill }: WidgetContentProps) => {
     if (widget.type === "kpi") return <KpiCard widget={widget} />;
+
+    // Compact insight summary card — 80px max, colored left border
+    if (widget.type === "insight_card") {
+        const sevColor = widget.severity === "CRITICAL" ? COLORS.danger
+            : widget.severity === "WARNING" ? COLORS.warning : COLORS.info;
+        let insightTitle = widget.title || "Finding";
+        try { if (!isNaN(Number(insightTitle))) insightTitle = widget.description?.slice(0, 60) || "Finding"; } catch { /* keep */ }
+        return (
+            <div style={{
+                display: "flex", flexDirection: "column", justifyContent: "center",
+                borderLeft: `4px solid ${sevColor}`,
+                height: 80, maxHeight: 80, padding: "8px 14px", overflow: "hidden",
+                position: "relative",
+            }}>
+                <span style={{
+                    position: "absolute", top: 8, right: 10,
+                    width: 8, height: 8, borderRadius: 999,
+                    background: sevColor,
+                }} />
+                <div style={{
+                    fontSize: 13, fontWeight: 700, color: COLORS.text,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    lineHeight: 1.3,
+                }}>
+                    {insightTitle}
+                </div>
+                {widget.description && (
+                    <div style={{
+                        fontSize: 11, color: COLORS.textSecondary,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        marginTop: 4, lineHeight: 1.3,
+                    }}>
+                        {formatCell(widget.description)}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
     if (visualType === "metric") return <MetricCard widget={widget} />;
 
-    if (widget.type === "donut_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
+    // Check if user overrode the visual type
+    const isDefaultVisual = visualType === autoVisualType(widget);
+
+    // Line chart (from blueprint)
+    if (isDefaultVisual && widget.type === "line_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
+        const chartData = widget.data.map((d: any) => ({ x: String(d.x || ""), y: Number(d.y || 0) }));
+        return (
+            <div style={{ width: "100%", height: 260 }}>
+                <ResponsiveContainer>
+                    <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.borderLight} />
+                        <XAxis dataKey="x" tick={AXIS_STYLE} axisLine={{ stroke: COLORS.border }} tickLine={false} />
+                        <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={TOOLTIP_STYLE} />
+                        <Line type="monotone" dataKey="y" stroke={widget.chart_config?.color || CHART_PALETTE[0]} strokeWidth={2.5}
+                            dot={{ r: 2, fill: widget.chart_config?.color || CHART_PALETTE[0], strokeWidth: 0 }}
+                            activeDot={{ r: 5, fill: widget.chart_config?.color || CHART_PALETTE[0], stroke: "#fff", strokeWidth: 2 }} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </div>
+        );
+    }
+
+    // Scatter chart
+    if (isDefaultVisual && widget.type === "scatter_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
+        const chartData = widget.data.map((d: any) => ({ x: String(d.x || ""), y: Number(d.y || 0) }));
+        return (
+            <div style={{ width: "100%", height: 260 }}>
+                <ResponsiveContainer>
+                    <BarChart data={chartData.slice(0, 60)}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.borderLight} />
+                        <XAxis dataKey="x" tick={AXIS_STYLE} axisLine={{ stroke: COLORS.border }} tickLine={false} />
+                        <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "rgba(20,184,166,0.06)" }} />
+                        <Bar dataKey="y" radius={[4, 4, 0, 0]}>
+                            {chartData.slice(0, 60).map((_: any, i: number) => <Cell key={i} fill={widget.chart_config?.color || "#14b8a6"} />)}
+                        </Bar>
+                    </BarChart>
+                </ResponsiveContainer>
+            </div>
+        );
+    }
+
+    if (isDefaultVisual && widget.type === "donut_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
         const colors = widget.chart_config?.colors || CHART_PALETTE;
         const chartData = widget.data.map((d: any) => ({ name: String(d.label || d.name || ""), value: Number(d.value || 0) }));
         const total = chartData.reduce((s: number, d: any) => s + d.value, 0);
@@ -531,8 +692,11 @@ const WidgetContent = ({ widget, visualType, filteredData }: WidgetContentProps)
                     <PieChart>
                         <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%"
                             innerRadius="58%" outerRadius="82%" strokeWidth={2} stroke="#fff"
-                            label={({ name, percent }: any) => `${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                            {chartData.map((_: any, i: number) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                            label={({ name, percent }: any) => `${(percent * 100).toFixed(0)}%`} labelLine={false}
+                            onClick={(_: any, index: number) => {
+                                if (onDrill && chartData[index]) onDrill({ column: widget.title || "", value: chartData[index].name });
+                            }}>
+                            {chartData.map((_: any, i: number) => <Cell key={i} fill={colors[i % colors.length]} style={{ cursor: "pointer" }} />)}
                         </Pie>
                         <Tooltip contentStyle={TOOLTIP_STYLE} />
                         <Legend wrapperStyle={{ fontSize: 11, color: COLORS.textSecondary }} iconType="circle" iconSize={8} />
@@ -546,7 +710,7 @@ const WidgetContent = ({ widget, visualType, filteredData }: WidgetContentProps)
         );
     }
 
-    if (widget.type === "bar_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
+    if (isDefaultVisual && widget.type === "bar_chart" && Array.isArray(widget.data) && widget.data.length > 0) {
         const chartData = widget.data.map((d: any) => ({ label: String(d.label || d.x || ""), value: Number(d.value || d.y || 0) }));
         return (
             <div style={{ width: "100%", height: Math.max(280, chartData.length * 34) }}>
@@ -556,8 +720,11 @@ const WidgetContent = ({ widget, visualType, filteredData }: WidgetContentProps)
                         <XAxis type="number" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
                         <YAxis dataKey="label" type="category" width={140} tick={AXIS_STYLE} axisLine={false} tickLine={false} />
                         <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "rgba(99,102,241,0.06)" }} />
-                        <Bar dataKey="value" radius={[0, 5, 5, 0]}>
-                            {chartData.map((_: any, i: number) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />)}
+                        <Bar dataKey="value" radius={[0, 5, 5, 0]}
+                            onClick={(data: any) => {
+                                if (onDrill && data?.label) onDrill({ column: widget.title || "", value: String(data.label) });
+                            }}>
+                            {chartData.map((_: any, i: number) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} style={{ cursor: "pointer" }} />)}
                         </Bar>
                     </BarChart>
                 </ResponsiveContainer>
@@ -666,10 +833,12 @@ function renderChart(type: VisualType, data: Array<{ x: string; y: number }>) {
 const MetricCard = ({ widget }: { widget: DashboardWidget }) => {
     const TrendIcon = widget.trend === "up" ? FiTrendingUp : widget.trend === "down" ? FiTrendingDown : FiMinus;
     const trendColor = widget.trend === "up" ? COLORS.success : widget.trend === "down" ? COLORS.danger : COLORS.textMuted;
+    const valStr = widget.value !== undefined ? String(widget.value) : "—";
+    const valFontSize = valStr.length > 9 ? 18 : valStr.length > 6 ? 24 : 32;
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ fontSize: 32, fontWeight: 800, color: COLORS.text, lineHeight: 1, letterSpacing: "-0.03em" }}>
-                {widget.value !== undefined ? String(widget.value) : "â€”"}
+            <div style={{ fontSize: valFontSize, fontWeight: 800, color: COLORS.text, lineHeight: 1, letterSpacing: "-0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {valStr}
                 {widget.unit && <span style={{ fontSize: 16, fontWeight: 500, color: COLORS.textSecondary, marginLeft: 4 }}>{widget.unit}</span>}
             </div>
             {widget.trendValue && (
@@ -694,8 +863,9 @@ const MetricCard = ({ widget }: { widget: DashboardWidget }) => {
 
 const KpiCard = ({ widget }: { widget: DashboardWidget }) => {
     const accent = widget.color || COLORS.primary;
-    const val = widget.value !== undefined ? String(widget.value) : "â€”";
+    const val = widget.value !== undefined ? String(widget.value) : "—";
     const display = typeof widget.value === "number" && widget.value >= 1000 ? widget.value.toLocaleString() : val;
+    const kpiFontSize = display.length > 9 ? 18 : display.length > 6 ? 24 : 28;
     return (
         <div style={{
             display: "flex", flexDirection: "column", justifyContent: "space-between", height: "100%",
@@ -705,7 +875,7 @@ const KpiCard = ({ widget }: { widget: DashboardWidget }) => {
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.8px", color: COLORS.textMuted, marginBottom: 8 }}>
                 {widget.title || ""}
             </div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: COLORS.text, lineHeight: 1.1, letterSpacing: "-0.03em" }}>{display}</div>
+            <div style={{ fontSize: kpiFontSize, fontWeight: 800, color: COLORS.text, lineHeight: 1.1, letterSpacing: "-0.03em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{display}</div>
             {widget.subtitle && <div style={{ fontSize: 11, color: accent, marginTop: 6, fontWeight: 600 }}>{widget.subtitle}</div>}
         </div>
     );
@@ -844,6 +1014,9 @@ function autoVisualType(widget: DashboardWidget): VisualType {
     if (widget.type === "kpi") return "metric";
     if (widget.type === "bar_chart") return "bar";
     if (widget.type === "donut_chart") return "pie";
+    if (widget.type === "line_chart") return "line";
+    if (widget.type === "scatter_chart") return "bar";
+    if (widget.type === "insight_card") return "metric";
     if (widget.type === "table") return "table";
     if (widget.type === "metric" || widget.type === "card") return "metric";
     if (Array.isArray(widget.data) && widget.data.length > 0) return "line";
@@ -851,20 +1024,26 @@ function autoVisualType(widget: DashboardWidget): VisualType {
 }
 
 function allowedVisuals(widget: DashboardWidget): VisualType[] {
-    if (widget.type === "kpi" || widget.type === "bar_chart" || widget.type === "donut_chart") return ["metric"];
+    if (widget.type === "kpi" || widget.type === "insight_card") return ["metric"];
+    if (widget.type === "bar_chart" || widget.type === "donut_chart") return ["bar", "pie", "table"];
+    if (widget.type === "line_chart" || widget.type === "scatter_chart") return ["line", "area", "bar", "table"];
     if (Array.isArray(widget.data) && widget.data.length > 0) return ["line", "area", "bar", "pie", "table", "metric"];
     return ["metric"];
 }
 
 function canSwitchVisual(widget: DashboardWidget): boolean {
-    if (widget.type === "kpi" || widget.type === "bar_chart" || widget.type === "donut_chart") return false;
+    if (widget.type === "kpi" || widget.type === "insight_card") return false;
+    if (widget.type === "bar_chart" || widget.type === "donut_chart" || widget.type === "line_chart" || widget.type === "scatter_chart") return true;
     return Array.isArray(widget.data) && widget.data.length > 0;
 }
 
 function widgetGridSpan(widget: DashboardWidget): number {
     if (widget.type === "table") return 12;
-    if (widget.type === "bar_chart") return 8;
+    if (widget.type === "bar_chart") return 6;
     if (widget.type === "donut_chart") return 4;
+    if (widget.type === "line_chart") return 6;
+    if (widget.type === "scatter_chart") return 6;
+    if (widget.type === "insight_card") return 4;
     if (widget.type === "kpi") return 3;
     if (widget.type === "metric" || widget.type === "card") return 3;
     if (Array.isArray(widget.data)) return 6;
@@ -876,6 +1055,13 @@ function buildSeries(widget: DashboardWidget, filteredData: any): Array<{ x: str
         const first = filteredData[0];
         if (Object.prototype.hasOwnProperty.call(first, "x") && Object.prototype.hasOwnProperty.call(first, "y")) {
             return filteredData.map((r: any) => ({ x: String(r.x), y: Number(r.y) })).filter((r: any) => isFinite(r.y));
+        }
+        // Handle {label, value} from bar_chart or {name, value} from donut_chart
+        if (Object.prototype.hasOwnProperty.call(first, "label") && Object.prototype.hasOwnProperty.call(first, "value")) {
+            return filteredData.map((r: any) => ({ x: String(r.label), y: Number(r.value) })).filter((r: any) => isFinite(r.y));
+        }
+        if (Object.prototype.hasOwnProperty.call(first, "name") && Object.prototype.hasOwnProperty.call(first, "value")) {
+            return filteredData.map((r: any) => ({ x: String(r.name), y: Number(r.value) })).filter((r: any) => isFinite(r.y));
         }
         const keys = Object.keys(first);
         const numKey = keys.find((k) => isFinite(Number(first[k])));
@@ -889,9 +1075,16 @@ function buildSeries(widget: DashboardWidget, filteredData: any): Array<{ x: str
 }
 
 function formatCell(value: unknown): string {
-    if (value === null || value === undefined) return "â€”";
+    if (value === null || value === undefined) return "—";
     if (typeof value === "number") return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    return String(value);
+    let text = String(value);
+    // Fix double-encoded UTF-8 artifacts from backend data
+    text = text.replace(/\u00e2\u20ac\u201d/g, "\u2014");   // â€" → —
+    text = text.replace(/\u00e2\u20ac\u201c/g, "\u2013");   // â€" → –
+    text = text.replace(/\u00e2\u20ac\u2122/g, "\u2019");   // â€™ → '
+    text = text.replace(/\u00e2\u20ac\u0153/g, "\u201c");   // â€œ → "
+    text = text.replace(/\u00c2\u00a0/g, " ");               // Â  → space
+    return text;
 }
 
 function formatTimestamp(iso: string): string {
@@ -930,12 +1123,51 @@ const ExportDashboardButton = ({ runId }: { runId: string }) => {
                 setExporting(false); return;
             }
             const outputDir = dirRes.data.directory_path;
-            await new Promise((r) => setTimeout(r, 2000));
+            await new Promise((r) => setTimeout(r, 500));
             const html2canvasModule = await import("html2canvas");
             const html2canvas = html2canvasModule.default || html2canvasModule;
             const target = document.getElementById("dashboard-canvas") || document.querySelector("[data-dashboard-root]");
             if (!target) { setExportMsg("Dashboard not ready. Please wait and try again."); setExporting(false); return; }
-            const canvas = await html2canvas(target as HTMLElement, { scale: 3, useCORS: true, backgroundColor: COLORS.canvasBg, logging: false, allowTaint: true });
+
+            // Temporarily expand container to fixed 1400px width for consistent capture
+            const el = target as HTMLElement;
+            const origOverflow = el.style.overflow;
+            const origHeight = el.style.height;
+            const origMaxHeight = el.style.maxHeight;
+            const origWidth = el.style.width;
+            const origMinWidth = el.style.minWidth;
+            el.style.overflow = "visible";
+            el.style.height = "auto";
+            el.style.maxHeight = "none";
+            el.style.width = "1400px";
+            el.style.minWidth = "1400px";
+            // Force recharts containers to render at min height
+            const chartEls = el.querySelectorAll<HTMLElement>(".recharts-responsive-container");
+            const origChartStyles: string[] = [];
+            chartEls.forEach((c) => { origChartStyles.push(c.style.cssText); c.style.width = "100%"; c.style.minHeight = "250px"; });
+            // Wait for reflow
+            await new Promise((r) => setTimeout(r, 1500));
+
+            const canvas = await html2canvas(el, {
+                scale: 1.5,
+                useCORS: true,
+                backgroundColor: COLORS.canvasBg,
+                logging: false,
+                allowTaint: true,
+                width: 1400,
+                height: el.scrollHeight,
+                windowWidth: 1400,
+                windowHeight: el.scrollHeight,
+            });
+
+            // Restore original styles
+            chartEls.forEach((c, i) => { c.style.cssText = origChartStyles[i] || ""; });
+            el.style.overflow = origOverflow;
+            el.style.height = origHeight;
+            el.style.maxHeight = origMaxHeight;
+            el.style.width = origWidth;
+            el.style.minWidth = origMinWidth;
+
             const imageBase64 = canvas.toDataURL("image/png");
             const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
             const res = await frontendApi.exportDashboardPdf(runId, base64Data, outputDir);

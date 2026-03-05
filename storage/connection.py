@@ -211,6 +211,26 @@ def close_connection() -> None:
                 _connection = None
 
 
+def get_run_file_name(run_id: str) -> str:
+    """Return the base file name (no extension) for a run, e.g. 'Breakdown_data'.
+
+    Queries the ingested_files table for the original filename.
+    Falls back to run_id if not found or on any error.
+    """
+    try:
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT file_name FROM ingested_files WHERE run_id = ? LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if row and row[0]:
+            stem = Path(row[0]).stem
+            return stem if stem else run_id
+        return run_id
+    except Exception:
+        return run_id
+
+
 def _get_schema_path() -> Path:
     """Find schema.sql in both dev and PyInstaller frozen environments."""
     if getattr(sys, 'frozen', False):

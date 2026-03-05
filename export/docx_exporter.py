@@ -29,6 +29,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 from utils.paths import EXPORT_DIR
+from storage.connection import get_run_file_name
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,8 +91,9 @@ class DocxExporter:
         target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(target_dir / f"insights_report_{run_id}_{timestamp}.docx")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(target_dir / f"{file_stem}_insights_report_{date_tag}.docx")
 
         doc = Document()
         self._apply_default_font(doc)

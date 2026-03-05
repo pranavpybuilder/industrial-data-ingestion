@@ -2,8 +2,8 @@
 PDF Exporter — Handles 3 export modes:
 
 MODE 1: Insights-only PDF (A4 portrait, reportlab platypus)
-MODE 2: Dashboard-only PDF (A3 landscape, embed base64 PNG)
-MODE 4: Full Report PDF (insights A4 + dashboard image pages)
+MODE 2: Dashboard-only PDF (smart orientation, multi-page for tall images)
+MODE 4: Full Report PDF (insights A4 + dashboard summary page)
 
 Uses reportlab for all PDF generation. 100% offline.
 All table cells use Paragraph objects for proper text wrapping.
@@ -11,17 +11,21 @@ All table cells use Paragraph objects for proper text wrapping.
 
 import base64
 import io
+import math
 import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from PIL import Image as PILImage
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, A3, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm, inch, mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
@@ -36,6 +40,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from storage.connection import get_run_file_name
 from utils.paths import EXPORT_DIR
 from utils.logger import get_logger
 
@@ -170,8 +175,9 @@ class PDFExporter:
         target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(target_dir / f"insights_report_{run_id}_{timestamp}.pdf")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(target_dir / f"{file_stem}_insights_report_{date_tag}.pdf")
 
         doc = SimpleDocTemplate(
             filename,
@@ -201,18 +207,17 @@ class PDFExporter:
         output_dir: Optional[str] = None,
     ) -> str:
         """
-        MODE 2: Generate dashboard screenshot PDF (A3 landscape).
+        MODE 2: Generate dashboard screenshot PDF.
 
-        Parameters
-        ----------
-        image_data_base64 : str
-            Base64-encoded PNG from html2canvas on the frontend.
+        Slice-based A3 landscape layout — crops the source image into
+        page-sized vertical slices and draws each one at exact content width.
         """
         target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(target_dir / f"dashboard_{run_id}_{timestamp}.pdf")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(target_dir / f"{file_stem}_dashboard_{date_tag}.pdf")
 
         # Decode base64 to temp file
         img_bytes = base64.b64decode(image_data_base64)
@@ -221,37 +226,61 @@ class PDFExporter:
         tmp_img.close()
 
         try:
-            page_w, page_h = landscape(A3)
-            doc = SimpleDocTemplate(
-                filename,
-                pagesize=landscape(A3),
-                rightMargin=1 * cm,
-                leftMargin=1 * cm,
-                topMargin=2 * cm,
-                bottomMargin=2 * cm,
-            )
+            pil_img = PILImage.open(tmp_img.name)
+            img_w, img_h = pil_img.size
 
-            story = []
+            # Constants — A3 landscape
+            PAGE_W_PT = 1190.0
+            PAGE_H_PT = 842.0
+            MARGIN = 30.0
+            HEADER = 35.0
+            FOOTER = 25.0
+            content_w = PAGE_W_PT - 2 * MARGIN
+            content_h = PAGE_H_PT - MARGIN - HEADER - FOOTER - MARGIN
 
-            # Header
-            story.append(Paragraph(
-                f"Dashboard Visualization \u2014 Run: {_safe_str(run_id)}",
-                self.styles["CoverSubtitle"],
-            ))
-            story.append(Paragraph(
-                f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                self.styles["SmallGray"],
-            ))
-            story.append(Spacer(1, 0.5 * cm))
+            scale = content_w / img_w
+            pixels_per_page = int(content_h / scale)
+            total_pages = math.ceil(img_h / pixels_per_page)
 
-            # Fit image to page
-            usable_w = page_w - 2 * cm
-            usable_h = page_h - 5 * cm
-            img = Image(tmp_img.name, width=usable_w, height=usable_h)
-            img.hAlign = "CENTER"
-            story.append(img)
+            from reportlab.pdfgen import canvas as pdf_canvas
+            c = pdf_canvas.Canvas(filename, pagesize=(PAGE_W_PT, PAGE_H_PT))
 
-            doc.build(story, onFirstPage=self._add_page_footer, onLaterPages=self._add_page_footer)
+            for page_idx in range(total_pages):
+                top_px = page_idx * pixels_per_page
+                bottom_px = min((page_idx + 1) * pixels_per_page, img_h)
+                cropped = pil_img.crop((0, top_px, img_w, bottom_px))
+                crop_buf = io.BytesIO()
+                cropped.save(crop_buf, format="PNG")
+                crop_buf.seek(0)
+
+                slice_h_pt = (bottom_px - top_px) * scale
+
+                # Header
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(MARGIN, PAGE_H_PT - MARGIN - 12,
+                             f"Dashboard — Run: {_safe_str(run_id)}")
+                c.setFont("Helvetica", 8)
+                c.drawRightString(PAGE_W_PT - MARGIN, PAGE_H_PT - MARGIN - 12,
+                                  f"Page {page_idx + 1} of {total_pages}")
+
+                # Image slice
+                img_y = PAGE_H_PT - MARGIN - HEADER - slice_h_pt
+                c.drawImage(
+                    ImageReader(crop_buf), MARGIN, img_y,
+                    width=content_w, height=slice_h_pt,
+                    preserveAspectRatio=False,
+                )
+
+                # Footer
+                c.setFont("Helvetica", 7)
+                c.drawString(MARGIN, MARGIN,
+                             f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+                if page_idx < total_pages - 1:
+                    c.showPage()
+
+            pil_img.close()
+            c.save()
             self.logger.info(f"PDF dashboard exported: {filename}")
         finally:
             os.unlink(tmp_img.name)
@@ -276,8 +305,9 @@ class PDFExporter:
         target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(target_dir / f"dashboard_{run_id}_{timestamp}.pdf")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(target_dir / f"{file_stem}_dashboard_{date_tag}.pdf")
 
         page_w, page_h = landscape(A3)
         doc = SimpleDocTemplate(
@@ -306,85 +336,134 @@ class PDFExporter:
         sections = blueprint.get("sections", [])
         metadata = blueprint.get("metadata", {})
 
-        # ── KPI Row ──
-        kpi_widgets = []
+        # ── Charts Section ──
+        for sec in sections:
+            if sec.get("type") == "charts":
+                story.append(Paragraph(_safe_str(sec.get("title", "Charts & Data Visualizations")), styles["Heading3"]))
+                story.append(Spacer(1, 0.3 * cm))
+                for widget in sec.get("widgets", []):
+                    w_type = widget.get("type", "")
+                    w_title = widget.get("title", "")
+                    if w_type == "kpi":
+                        story.append(Paragraph(
+                            f"{_safe_str(w_title)}: <b>{_safe_str(widget.get('value', ''))}</b>",
+                            styles["Normal"],
+                        ))
+                    elif w_type in ("line_chart", "bar_chart", "scatter_chart", "donut_chart"):
+                        story.append(Paragraph(f"[{w_type.replace('_', ' ').title()}] {_safe_str(w_title)}", styles["Normal"]))
+                        labels = widget.get("labels", [])
+                        values = widget.get("values", [])
+                        if labels and values:
+                            chart_rows = [[
+                                Paragraph("<b>Label</b>", styles["Normal"]),
+                                Paragraph("<b>Value</b>", styles["Normal"]),
+                            ]]
+                            for lbl, val in list(zip(labels, values))[:20]:
+                                chart_rows.append([
+                                    Paragraph(_safe_str(lbl), styles["Normal"]),
+                                    Paragraph(_safe_str(val), styles["Normal"]),
+                                ])
+                            ct = Table(chart_rows, colWidths=[8 * cm, 6 * cm])
+                            ct.setStyle(TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+                                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
+                                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D1D5DB")),
+                                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                            ]))
+                            story.append(ct)
+                    else:
+                        story.append(Paragraph(
+                            f"{_safe_str(w_title)}: {_safe_str(widget.get('value', ''))}",
+                            styles["Normal"],
+                        ))
+                    story.append(Spacer(1, 0.2 * cm))
+                story.append(Spacer(1, 0.3 * cm))
+
+        # ── Findings Section ──
+        for sec in sections:
+            if sec.get("type") == "findings":
+                story.append(Paragraph(_safe_str(sec.get("title", "Intelligence Findings")), styles["Heading3"]))
+                story.append(Spacer(1, 0.3 * cm))
+                for widget in sec.get("widgets", []):
+                    severity = _safe_str(widget.get("severity", "INFO"))
+                    title = _safe_str(widget.get("title", ""))
+                    desc = _safe_str(widget.get("description", ""))
+                    story.append(Paragraph(
+                        f"<b>[{severity}]</b> {title}", styles["Normal"]
+                    ))
+                    if desc:
+                        story.append(Paragraph(desc, styles["SmallGray"]))
+                    metrics = widget.get("metrics", {})
+                    if metrics:
+                        metric_parts = [f"{_safe_str(k)}: {_safe_str(v)}" for k, v in metrics.items()]
+                        story.append(Paragraph(" | ".join(metric_parts), styles["SmallGray"]))
+                    story.append(Spacer(1, 0.2 * cm))
+                story.append(Spacer(1, 0.3 * cm))
+
+        # ── Legacy fallback: KPI Row, Table, Donut/Card ──
         for sec in sections:
             if sec.get("type") == "kpi_row":
                 kpi_widgets = sec.get("widgets", [])
-                break
-
-        if kpi_widgets:
-            kpi_data = [[
-                Paragraph(_safe_str(w.get("title", "")), styles["Normal"])
-                for w in kpi_widgets
-            ], [
-                Paragraph(f"<b>{_safe_str(w.get('value', ''))}</b>", styles["Normal"])
-                for w in kpi_widgets
-            ]]
-            kpi_table = Table(kpi_data, colWidths=[3.5 * cm] * len(kpi_widgets))
-            kpi_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), BLUE_HEADER),
-                ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-                ("BACKGROUND", (0, 1), (-1, 1), LIGHT_GRAY),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
-            ]))
-            story.append(kpi_table)
-            story.append(Spacer(1, 0.5 * cm))
-
-        # ── Data Tables ──
-        for sec in sections:
-            if sec.get("type") != "table":
-                continue
-            for widget in sec.get("widgets", []):
-                w_title = widget.get("title", "Data")
-                columns = widget.get("columns", [])
-                rows = widget.get("data", [])
-
-                if not columns or not rows:
-                    continue
-
-                story.append(Paragraph(_safe_str(w_title), styles["Heading3"]))
-                story.append(Spacer(1, 0.2 * cm))
-
-                # Build header
-                col_keys = [c.get("key", "") for c in columns]
-                header = [Paragraph(f"<b>{_safe_str(c.get('label', c.get('key', '')))}</b>",
-                                    styles["Normal"]) for c in columns]
-
-                # Build rows (max 50 for PDF readability)
-                table_data = [header]
-                for row in rows[:50]:
-                    table_data.append([
-                        Paragraph(_safe_str(row.get(k, "")), styles["Normal"])
-                        for k in col_keys
-                    ])
-
-                # Calculate column widths
-                usable = page_w - 2 * cm
-                col_w = usable / max(len(columns), 1)
-                t = Table(table_data, colWidths=[col_w] * len(columns))
-                t.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, 0), NAVY),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-                    ("FONTSIZE", (0, 0), (-1, -1), 7),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
-                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D1D5DB")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ]))
-                story.append(t)
-                story.append(Spacer(1, 0.5 * cm))
-
-        # ── Donut/Quality sections as summary text ──
-        for sec in sections:
-            if sec.get("type") in ("donut_chart", "card"):
+                if kpi_widgets:
+                    kpi_data = [[
+                        Paragraph(_safe_str(w.get("title", "")), styles["Normal"])
+                        for w in kpi_widgets
+                    ], [
+                        Paragraph(f"<b>{_safe_str(w.get('value', ''))}</b>", styles["Normal"])
+                        for w in kpi_widgets
+                    ]]
+                    kpi_table = Table(kpi_data, colWidths=[3.5 * cm] * len(kpi_widgets))
+                    kpi_table.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), BLUE_HEADER),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+                        ("BACKGROUND", (0, 1), (-1, 1), LIGHT_GRAY),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("FONTSIZE", (0, 0), (-1, -1), 9),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                        ("TOPPADDING", (0, 0), (-1, -1), 6),
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1D5DB")),
+                    ]))
+                    story.append(kpi_table)
+                    story.append(Spacer(1, 0.5 * cm))
+            elif sec.get("type") == "table":
+                for widget in sec.get("widgets", []):
+                    w_title = widget.get("title", "Data")
+                    columns = widget.get("columns", [])
+                    rows = widget.get("data", [])
+                    if not columns or not rows:
+                        continue
+                    story.append(Paragraph(_safe_str(w_title), styles["Heading3"]))
+                    story.append(Spacer(1, 0.2 * cm))
+                    col_keys = [c.get("key", "") for c in columns]
+                    header = [Paragraph(f"<b>{_safe_str(c.get('label', c.get('key', '')))}</b>",
+                                        styles["Normal"]) for c in columns]
+                    table_data = [header]
+                    for row in rows[:50]:
+                        table_data.append([
+                            Paragraph(_safe_str(row.get(k, "")), styles["Normal"])
+                            for k in col_keys
+                        ])
+                    usable = page_w - 2 * cm
+                    col_w = usable / max(len(columns), 1)
+                    t = Table(table_data, colWidths=[col_w] * len(columns))
+                    t.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+                        ("FONTSIZE", (0, 0), (-1, -1), 7),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LIGHT_GRAY]),
+                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D1D5DB")),
+                        ("TOPPADDING", (0, 0), (-1, -1), 3),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ]))
+                    story.append(t)
+                    story.append(Spacer(1, 0.5 * cm))
+            elif sec.get("type") in ("donut_chart", "card"):
                 story.append(Paragraph(_safe_str(sec.get("title", "")), styles["Heading3"]))
                 for widget in sec.get("widgets", []):
                     title = widget.get("title", "")
@@ -409,7 +488,7 @@ class PDFExporter:
         self,
         run_id: str,
         unified_insights: List[Dict[str, Any]],
-        image_data_base64: str,
+        image_data_base64: str = "",
         profiling_results: Optional[Dict[str, Any]] = None,
         narrative: Optional[Dict[str, Any]] = None,
         ml_findings: Optional[List[Dict[str, Any]]] = None,
@@ -417,93 +496,148 @@ class PDFExporter:
     ) -> str:
         """
         MODE 4: Full report PDF.
-        A4 portrait for insights → page break → A3 landscape for dashboard image.
-
-        Uses BaseDocTemplate with two PageTemplates to switch page sizes.
+        A4 portrait for insights → dashboard summary page.
+        If a dashboard image is provided, appends it on A3 landscape pages.
+        If no image, generates a text-based dashboard summary instead.
         """
         target_dir = Path(output_dir) if output_dir else EXPORT_DIR / run_id
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = str(target_dir / f"full_report_{run_id}_{timestamp}.pdf")
+        file_stem = get_run_file_name(run_id)
+        date_tag = datetime.now().strftime("%Y%m%d")
+        filename = str(target_dir / f"{file_stem}_full_report_{date_tag}.pdf")
 
-        # Decode dashboard image
-        img_bytes = base64.b64decode(image_data_base64)
-        tmp_img = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        tmp_img.write(img_bytes)
-        tmp_img.close()
+        has_image = bool(image_data_base64 and image_data_base64.strip())
+        tmp_img_path = None
+
+        if has_image:
+            img_bytes = base64.b64decode(image_data_base64)
+            tmp_img = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            tmp_img.write(img_bytes)
+            tmp_img.close()
+            tmp_img_path = tmp_img.name
 
         try:
-            # Portrait (A4) frame
-            a4_w, a4_h = A4
-            portrait_frame = Frame(
-                1.5 * cm, 2.5 * cm,
-                a4_w - 3 * cm, a4_h - 4.5 * cm,
-                id="portrait",
-            )
-            portrait_tmpl = PageTemplate(
-                id="portrait",
-                frames=[portrait_frame],
-                pagesize=A4,
-                onPage=self._add_page_footer,
-            )
+            if has_image:
+                # Use BaseDocTemplate with two page templates
+                a4_w, a4_h = A4
+                portrait_frame = Frame(
+                    1.5 * cm, 2.5 * cm,
+                    a4_w - 3 * cm, a4_h - 4.5 * cm,
+                    id="portrait",
+                )
+                portrait_tmpl = PageTemplate(
+                    id="portrait",
+                    frames=[portrait_frame],
+                    pagesize=A4,
+                    onPage=self._add_page_footer,
+                )
 
-            # Landscape (A3) frame
-            a3_w, a3_h = landscape(A3)
-            landscape_frame = Frame(
-                1 * cm, 2 * cm,
-                a3_w - 2 * cm, a3_h - 4 * cm,
-                id="landscape",
-            )
-            landscape_tmpl = PageTemplate(
-                id="landscape",
-                frames=[landscape_frame],
-                pagesize=landscape(A3),
-                onPage=self._add_page_footer,
-            )
+                a3_w, a3_h = landscape(A3)
+                landscape_frame = Frame(
+                    1 * cm, 2 * cm,
+                    a3_w - 2 * cm, a3_h - 4 * cm,
+                    id="landscape",
+                )
+                landscape_tmpl = PageTemplate(
+                    id="landscape",
+                    frames=[landscape_frame],
+                    pagesize=landscape(A3),
+                    onPage=self._add_page_footer,
+                )
 
-            doc = BaseDocTemplate(
-                filename,
-                pageTemplates=[portrait_tmpl, landscape_tmpl],
-            )
+                doc = BaseDocTemplate(
+                    filename,
+                    pageTemplates=[portrait_tmpl, landscape_tmpl],
+                )
 
-            story = self._build_insights_story(
-                run_id, unified_insights, profiling_results, narrative, ml_findings
-            )
+                story = self._build_insights_story(
+                    run_id, unified_insights, profiling_results, narrative, ml_findings
+                )
 
-            # ── Dashboard Divider Page ──
-            story.append(PageBreak())
-            story.append(Spacer(1, 6 * cm))
-            story.append(Paragraph(
-                "Dashboard Visualization",
-                self.styles["CoverTitle"],
-            ))
-            story.append(Paragraph(
-                "The following page contains the interactive dashboard snapshot.",
-                self.styles["SmallGray"],
-            ))
+                # Dashboard divider page
+                story.append(PageBreak())
+                story.append(Spacer(1, 6 * cm))
+                story.append(Paragraph(
+                    "Dashboard Visualization",
+                    self.styles["CoverTitle"],
+                ))
+                story.append(Paragraph(
+                    "The following page contains the dashboard snapshot.",
+                    self.styles["SmallGray"],
+                ))
 
-            # Switch to landscape template for dashboard image
-            story.append(NextPageTemplate("landscape"))
-            story.append(PageBreak())
+                story.append(NextPageTemplate("landscape"))
+                story.append(PageBreak())
+                story.append(Paragraph(
+                    f"Dashboard — Run: {_safe_str(run_id)}",
+                    self.styles["CoverSubtitle"],
+                ))
+                story.append(Spacer(1, 0.5 * cm))
 
-            # Dashboard image page
-            story.append(Paragraph(
-                f"Dashboard \u2014 Run: {_safe_str(run_id)}",
-                self.styles["CoverSubtitle"],
-            ))
-            story.append(Spacer(1, 0.5 * cm))
+                usable_w = a3_w - 2 * cm
+                usable_h = a3_h - 6 * cm
+                img = Image(tmp_img_path, width=usable_w, height=usable_h)
+                img.hAlign = "CENTER"
+                story.append(img)
 
-            usable_w = a3_w - 2 * cm
-            usable_h = a3_h - 6 * cm
-            img = Image(tmp_img.name, width=usable_w, height=usable_h)
-            img.hAlign = "CENTER"
-            story.append(img)
+                doc.build(story)
+            else:
+                # No dashboard image — A4-only report with summary page
+                doc = SimpleDocTemplate(
+                    filename,
+                    pagesize=A4,
+                    rightMargin=1.5 * cm,
+                    leftMargin=1.5 * cm,
+                    topMargin=2 * cm,
+                    bottomMargin=2.5 * cm,
+                )
 
-            doc.build(story)
+                story = self._build_insights_story(
+                    run_id, unified_insights, profiling_results, narrative, ml_findings
+                )
+
+                # Dashboard summary page
+                story.append(PageBreak())
+                story.append(Paragraph(
+                    "Dashboard Summary",
+                    self.styles["CoverTitle"],
+                ))
+                story.append(Spacer(1, 0.5 * cm))
+
+                # Key metrics summary
+                critical = sum(1 for i in unified_insights if str(i.get("severity", "")).upper() == "CRITICAL")
+                warnings = sum(1 for i in unified_insights if str(i.get("severity", "")).upper() == "WARNING")
+                info_count = len(unified_insights) - critical - warnings
+
+                summary_data = [
+                    [Paragraph("Metric", self.styles["CellHeaderWhite"]),
+                     Paragraph("Value", self.styles["CellHeaderWhite"])],
+                    [Paragraph("Total Findings", self.styles["CellNormal"]),
+                     Paragraph(str(len(unified_insights)), self.styles["CellNormal"])],
+                    [Paragraph("Critical Issues", self.styles["CellNormal"]),
+                     Paragraph(str(critical), self.styles["CellNormal"])],
+                    [Paragraph("Warnings", self.styles["CellNormal"]),
+                     Paragraph(str(warnings), self.styles["CellNormal"])],
+                    [Paragraph("Informational", self.styles["CellNormal"]),
+                     Paragraph(str(info_count), self.styles["CellNormal"])],
+                ]
+                summary_table = Table(summary_data, colWidths=[9 * cm, 7 * cm])
+                summary_table.setStyle(self._header_table_style())
+                story.append(summary_table)
+                story.append(Spacer(1, 0.5 * cm))
+
+                story.append(Paragraph(
+                    "To include a full dashboard screenshot, use the Export PDF button on the Dashboard page.",
+                    self.styles["SmallGray"],
+                ))
+
+                doc.build(story, onFirstPage=self._add_page_footer, onLaterPages=self._add_page_footer)
+
             self.logger.info(f"PDF full report exported: {filename}")
         finally:
-            os.unlink(tmp_img.name)
+            if tmp_img_path:
+                os.unlink(tmp_img_path)
 
         return filename
 

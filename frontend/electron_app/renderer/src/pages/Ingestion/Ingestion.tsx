@@ -53,7 +53,8 @@ const Ingestion = () => {
       return;
     }
 
-    onRunChange(runId);
+    const fileBaseName = filePath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") || "";
+    onRunChange(runId, fileBaseName);
     setStatus("success");
   };
 

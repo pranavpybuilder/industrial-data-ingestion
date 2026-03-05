@@ -1,4 +1,5 @@
 from storage.repositories.run_repo import RunRepository
+from storage.connection import get_run_file_name
 
 run_repo = RunRepository()
 
@@ -13,6 +14,7 @@ def get_active_run_ipc():
             "message": "No active run found",
         }
 
+    run["file_name"] = get_run_file_name(run["run_id"])
     return {
         "success": True,
         "data": run,
@@ -25,6 +27,7 @@ def list_runs():
         {
             "run_id": r["run_id"],
             "run_name": r.get("run_name"),
+            "file_name": get_run_file_name(r["run_id"]),
             "source_type": r.get("source_type"),
             "status": r.get("status"),
             "error_message": r.get("error_message"),
@@ -50,6 +53,7 @@ def search_runs_ipc(query: str):
         {
             "run_id": r["run_id"],
             "run_name": r.get("run_name"),
+            "file_name": get_run_file_name(r["run_id"]),
             "source_type": r.get("source_type"),
             "status": r.get("status"),
             "error_message": r.get("error_message"),

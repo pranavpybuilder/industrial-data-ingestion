@@ -45,7 +45,7 @@ const AppLayout = () => {
             }}
           />
           <span style={styles.runText}>
-            {hasRun ? runState.activeRunId : "No active run"}
+            {hasRun ? (runState.activeFileName || runState.activeRunId) : "No active run"}
           </span>
 
           <button

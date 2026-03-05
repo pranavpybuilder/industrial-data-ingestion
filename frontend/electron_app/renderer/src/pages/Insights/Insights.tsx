@@ -193,7 +193,7 @@ const Insights = () => {
           </div>
           <div style={{ flex: 1 }}>
             <h1 style={st.title}>Analysis Results</h1>
-            <p style={st.subtitle}>Run: <strong>{activeRun}</strong></p>
+            <p style={st.subtitle}>Run: <strong>{runState.activeFileName || activeRun}</strong></p>
           </div>
           {!loading && !error && operationalInsights.length > 0 && (
             <span style={{ ...st.riskBadge, color: riskBadge.color, borderColor: riskBadge.color }}>
